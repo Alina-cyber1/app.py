@@ -2,8 +2,9 @@ streamlit==1.54.0
 pandas==2.3.3
 numpy==1.26.4
 altair==6.0.0
-plotly  # добавьте, если используете plotly графики
-matplotlib  # добавьте, если используете matplotlib
+plotly
+matplotlib
+reportlab
 pillow==12.1.0
 requests==2.32.5
 pyarrow==23.0.1
