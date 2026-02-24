@@ -1,0 +1,27 @@
+
++  C:\Users\Alina> cd AI_projects\Стажировка
++  ~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (C:\Users\Alina>:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+PS C:\Users\Alina> (venv) PS C:\Users\Alina> cd AI_projects\Стажировка
+строка:1 знак:8
++ (venv) PS C:\Users\Alina> cd AI_projects\Стажировка
++        ~~
+Непредвиденная лексема "PS" в выражении или операторе.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+
+PS C:\Users\Alina> cd AI_projects\Стажировка
+PS C:\Users\Alina\AI_projects\Стажировка> dir
+
+
+    Каталог: C:\Users\Alina\AI_projects\Стажировка
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----        18.02.2026      0:11          29214 app.py
+
+
+PS C:\Users\Alina\AI_projects\Стажировка> streamlit run app.py
