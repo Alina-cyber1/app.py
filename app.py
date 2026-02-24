@@ -683,18 +683,18 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-import os
-import threading
-from pyngrok import ngrok
+#import os
+#import threading
+#from pyngrok import ngrok
 
 # Функция запуска Streamlit
-def run_streamlit():
-    os.system("streamlit run app.py --server.port 8501 &")
+#def run_streamlit():
+ #   os.system("streamlit run app.py --server.port 8501 &")
 
 # Запускаем Streamlit в фоне
-thread = threading.Thread(target=run_streamlit)
-thread.start()
+#thread = threading.Thread(target=run_streamlit)
+#thread.start()
 
 # Открываем туннель через ngrok
-public_url = ngrok.connect(addr='8501', proto='http')
-print("🚀 Ваше приложение доступно по ссылке:", public_url)
+#public_url = ngrok.connect(addr='8501', proto='http')
+#print("🚀 Ваше приложение доступно по ссылке:", public_url)
