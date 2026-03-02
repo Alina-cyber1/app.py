@@ -133,5 +133,4 @@ df_gene = create_realistic_data('gene_engineering', 3500).sort_values('publicati
 df_gene.to_parquet('data/processed/gene_engineering_clean.parquet', index=False)
 print(f"✅ Сохранено {len(df_gene)} статей")
 
->>>>>>> 1a90b1cf65e0b10740b211c4f00ed660dda84e39
 print("\n🎉 Готово! Файлы созданы в папке data/processed/")
