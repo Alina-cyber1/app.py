@@ -78,7 +78,6 @@ st.markdown("""
 # ========== ФУНКЦИЯ ГЕНЕРАЦИИ PDF ==========
 def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     """Генерирует PDF отчет с графиками и метриками"""
-    # (функция остаётся без изменений, как в вашем исходном коде)
     if not PDF_AVAILABLE:
         return None
 
@@ -490,13 +489,11 @@ with tab3:
     st.markdown(f"## 📊 Данные по {domain_clean}")
 
     # Загружаем DataFrame для показа примеров
-    # (можно переиспользовать уже загруженный, но здесь для простоты загрузим снова)
     domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
     file_path = f"data/processed/{domain_key}_clean.parquet"
     try:
         df_sample = pd.read_parquet(file_path).head(20)
-        # Выбираем несколько колонок для отображения
         display_cols = ['title', 'publication_date', 'cited_by_count', 'topic_name']
         df_display = df_sample[[c for c in display_cols if c in df_sample.columns]]
         st.dataframe(
@@ -522,7 +519,6 @@ with tab3:
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        # Скачать CSV (можно сформировать из текущего набора)
         if 'df_display' in locals():
             csv = df_display.to_csv(index=False).encode('utf-8')
         else:
