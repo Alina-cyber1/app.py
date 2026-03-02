@@ -10,13 +10,14 @@ import matplotlib.pyplot as plt
 # Импортируем наш загрузчик данных
 from data_loader import load_domain_data
 
-# ========== НАСТРОЙКА СТРАНИЦЫ (ПЕРВЫЙ ВЫЗОВ STREAMLIT) ==========
+# ========== НАСТРОЙКА СТРАНИЦЫ (ТОЛЬКО ОДИН РАЗ, ПЕРВЫЙ ВЫЗОВ STREAMLIT) ==========
 st.set_page_config(
     page_title="Tech Trends Monitor",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 # ========== ИМПОРТЫ ДЛЯ PDF ==========
 try:
     from reportlab.lib import colors
@@ -28,14 +29,6 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
     st.warning("⚠️ Для экспорта PDF установите: pip install reportlab matplotlib")
-
-# ========== НАСТРОЙКА СТРАНИЦЫ ==========
-st.set_page_config(
-    page_title="Tech Trends Monitor",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # ========== КРАСИВЫЙ CSS ==========
 st.markdown("""
