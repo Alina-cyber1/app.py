@@ -10,6 +10,13 @@ import matplotlib.pyplot as plt
 # Импортируем наш загрузчик данных
 from data_loader import load_domain_data
 
+# ========== НАСТРОЙКА СТРАНИЦЫ (ПЕРВЫЙ ВЫЗОВ STREAMLIT) ==========
+st.set_page_config(
+    page_title="Tech Trends Monitor",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 # ========== ИМПОРТЫ ДЛЯ PDF ==========
 try:
     from reportlab.lib import colors
