@@ -7,6 +7,9 @@ import numpy as np
 import io
 import matplotlib.pyplot as plt
 
+# Импортируем наш загрузчик данных
+from data_loader import load_domain_data
+
 # ========== ИМПОРТЫ ДЛЯ PDF ==========
 try:
     from reportlab.lib import colors
@@ -75,15 +78,15 @@ st.markdown("""
 # ========== ФУНКЦИЯ ГЕНЕРАЦИИ PDF ==========
 def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     """Генерирует PDF отчет с графиками и метриками"""
-    
+    # (функция остаётся без изменений, как в вашем исходном коде)
     if not PDF_AVAILABLE:
         return None
-    
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
     story = []
-    
+
     # Заголовок
     title_style = ParagraphStyle(
         'CustomTitle',
@@ -93,10 +96,10 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
         alignment=1,
         spaceAfter=30
     )
-    
+
     title = Paragraph(f"🚀 Tech Trends Report: {domain_name}", title_style)
     story.append(title)
-    
+
     # Дата
     date_style = ParagraphStyle(
         'DateStyle',
@@ -108,11 +111,11 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     date_text = Paragraph(f"Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M')}", date_style)
     story.append(date_text)
     story.append(Spacer(1, 20))
-    
+
     # Ключевые метрики
     story.append(Paragraph("📊 Ключевые метрики", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     metrics_data = [
         ['Показатель', 'Значение', 'Изменение'],
         ['Научные публикации', str(metrics['papers_total']), f"+{metrics['papers_growth']}%"],
@@ -121,7 +124,7 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
         ['Trend Score', f"{metrics['trend_score']}/100", metrics['trend_status']],
         ['AI-интеграция', f"{metrics['ai_share']}%", "в патентах"]
     ]
-    
+
     metrics_table = Table(metrics_data, colWidths=[150, 100, 100])
     metrics_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
@@ -137,15 +140,15 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     ]))
     story.append(metrics_table)
     story.append(Spacer(1, 20))
-    
+
     # Топ заявителей
     story.append(Paragraph("🏭 Топ-5 заявителей", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     assignees_data = [['Компания', 'Количество патентов']]
     for i in range(len(metrics['top_assignees'])):
         assignees_data.append([metrics['top_assignees'][i], str(metrics['assignee_values'][i])])
-    
+
     assignees_table = Table(assignees_data, colWidths=[200, 100])
     assignees_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00CC96')),
@@ -157,15 +160,15 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     ]))
     story.append(assignees_table)
     story.append(Spacer(1, 20))
-    
+
     # География
     story.append(Paragraph("🌍 География патентования", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     geo_data = [['Страна', 'Доля (%)']]
     for i in range(len(metrics['countries'])):
         geo_data.append([metrics['countries'][i], str(metrics['country_values'][i])])
-    
+
     geo_table = Table(geo_data, colWidths=[150, 100])
     geo_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF4B4B')),
@@ -177,11 +180,11 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     ]))
     story.append(geo_table)
     story.append(Spacer(1, 20))
-    
+
     # График динамики
     story.append(Paragraph("📈 Динамика развития (последние 2 года)", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(dates[-24:], papers[-24:], label='Публикации', color='#00CC96', linewidth=2)
     ax.plot(dates[-24:], patents[-24:], label='Патенты', color='#FF4B4B', linewidth=2)
@@ -192,30 +195,30 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     ax.grid(True, alpha=0.3)
     ax.set_facecolor('#f8f9fa')
     fig.patch.set_facecolor('#f8f9fa')
-    
+
     img_buffer = io.BytesIO()
     fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
     plt.close(fig)
     img_buffer.seek(0)
-    
+
     story.append(Image(img_buffer, width=450, height=250))
     story.append(Spacer(1, 20))
-    
+
     # Подтехнологии
     story.append(Paragraph("🔬 Быстрорастущие подтехнологии", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     if "Полупроводники" in domain_name:
         subtopics = ["Квантовые вычисления", "Advanced Packaging", "GaN/SiC устройства", "EUV литография", "MRAM память"]
         growth = [55, 45, 38, 42, 28]
     else:
         subtopics = ["CRISPR-Cas12/13", "Липидные наночастицы", "CAR-T терапия", "Base editing", "Вирусные векторы"]
         growth = [68, 73, 52, 48, 41]
-    
+
     subtopics_data = [['Подтехнология', 'Рост за год (%)']]
     for i in range(len(subtopics)):
         subtopics_data.append([subtopics[i], str(growth[i])])
-    
+
     subtopics_table = Table(subtopics_data, colWidths=[250, 100])
     subtopics_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#764ba2')),
@@ -227,11 +230,11 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     ]))
     story.append(subtopics_table)
     story.append(Spacer(1, 30))
-    
+
     # Рекомендации
     story.append(Paragraph("💡 Рекомендации", styles['Heading2']))
     story.append(Spacer(1, 10))
-    
+
     if metrics['trend_score'] > 80:
         recs = [
             "🔥 Технология показывает взрывной рост. Рекомендуется:",
@@ -253,61 +256,14 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
             "• Искать новые ниши применения",
             "• Мониторить смежные области"
         ]
-    
+
     for rec in recs:
         story.append(Paragraph(rec, styles['Normal']))
         story.append(Spacer(1, 3))
-    
+
     doc.build(story)
     buffer.seek(0)
     return buffer
-
-# ========== ЗАГРУЗКА ДАННЫХ ==========
-@st.cache_data(ttl=3600)
-def load_domain_data(domain_name):
-    """Загружает данные в зависимости от выбранного домена"""
-    
-    if "Полупроводники" in domain_name:
-        dates = pd.date_range(start='2018-01-01', end='2025-01-01', freq='M')
-        np.random.seed(42)
-        papers = 40 + np.cumsum(np.random.randn(len(dates)) * 1.5 + 1.5)
-        patents = 20 + np.cumsum(np.random.randn(len(dates)) * 1.2 + 1.0)
-        metrics = {
-            'papers_total': 1234,
-            'papers_growth': 12,
-            'patents_total': 892,
-            'patents_growth': 8,
-            'time_lag': 3.2,
-            'time_lag_change': -0.5,
-            'trend_score': 78,
-            'trend_status': '📈 Emerging',
-            'top_assignees': ['TSMC', 'Intel', 'Samsung', 'Qualcomm', 'Micron'],
-            'assignee_values': [234, 189, 156, 98, 76],
-            'countries': ['US', 'CN', 'JP', 'KR', 'EP'],
-            'country_values': [45, 25, 12, 10, 8],
-            'ai_share': 32
-        }
-    else:
-        dates = pd.date_range(start='2018-01-01', end='2025-01-01', freq='M')
-        np.random.seed(123)
-        papers = 30 + np.cumsum(np.random.randn(len(dates)) * 1.8 + 2.0)
-        patents = 15 + np.cumsum(np.random.randn(len(dates)) * 1.5 + 1.2)
-        metrics = {
-            'papers_total': 2156,
-            'papers_growth': 28,
-            'patents_total': 743,
-            'patents_growth': 35,
-            'time_lag': 4.8,
-            'time_lag_change': -1.2,
-            'trend_score': 92,
-            'trend_status': '🔥 Hot',
-            'top_assignees': ['Editas Medicine', 'CRISPR Therapeutics', 'Intellia', 'Vertex', 'Moderna'],
-            'assignee_values': [145, 132, 98, 67, 54],
-            'countries': ['US', 'CN', 'EP', 'JP', 'KR'],
-            'country_values': [58, 18, 12, 7, 5],
-            'ai_share': 18
-        }
-    return dates, papers, patents, metrics
 
 # ========== ЗАГОЛОВОК ==========
 st.markdown('<h1 class="main-header">🚀 Tech Trends Monitor</h1>', unsafe_allow_html=True)
@@ -317,15 +273,15 @@ st.markdown("*Отслеживание перехода науки в техно
 with st.sidebar:
     st.markdown("## 🎛 Панель управления")
     st.markdown("---")
-    
+
     domain = st.selectbox(
         "🔬 Технологический домен",
         ["💻 Полупроводники", "🧬 Генная инженерия"],
         help="Выберите технологическую область для анализа"
     )
-    
+
     domain_clean = domain.replace("💻 ", "").replace("🧬 ", "")
-    
+
     if "Полупроводники" in domain:
         st.markdown("""
         <div class="domain-card">
@@ -344,11 +300,11 @@ with st.sidebar:
             CRISPR/Cas, Gene therapy, Vectors
         </div>
         """, unsafe_allow_html=True)
-    
+
     st.markdown("---")
     st.markdown("### 📅 Период анализа")
     year_range = st.slider("Выберите годы", 2015, 2025, (2020, 2025), label_visibility="collapsed")
-    
+
     st.markdown("### 🌍 Страны патентования")
     col1, col2 = st.columns(2)
     with col1:
@@ -359,11 +315,12 @@ with st.sidebar:
         kr = st.checkbox("🇰🇷 KR", value=False)
         ep = st.checkbox("🇪🇺 EP", value=True)
         wo = st.checkbox("🌐 WO", value=False)
-    
+
     st.markdown("---")
     st.markdown("### 📊 Статус системы")
+    # Загружаем данные (вызов нашей функции)
     dates, papers, patents, metrics = load_domain_data(domain_clean)
-    
+
     status_col1, status_col2 = st.columns(2)
     with status_col1:
         st.markdown("🟢 OpenAlex")
@@ -372,9 +329,6 @@ with st.sidebar:
         st.markdown(f"✅ {metrics['papers_total']} статей")
         st.markdown(f"⏳ {metrics['patents_total']} патентов")
     st.progress(0.8, text="Готовность MVP")
-
-# ========== ЗАГРУЗКА ДАННЫХ ==========
-dates, papers, patents, metrics = load_domain_data(domain_clean)
 
 # ========== МЕТРИКИ ==========
 col1, col2, col3, col4 = st.columns(4)
@@ -416,24 +370,24 @@ tab1, tab2, tab3, tab4 = st.tabs(["📈 Тренды", "🔬 Подтехнол�
 
 with tab1:
     st.markdown(f"## 📊 Динамика развития: {domain_clean}")
-    
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dates, y=papers, 
-        name='📄 Научные публикации', 
+        x=dates, y=papers,
+        name='📄 Научные публикации',
         line=dict(color='#00CC96', width=4),
-        fill='tozeroy', 
+        fill='tozeroy',
         fillcolor='rgba(0,204,150,0.1)'
     ))
     fig.add_trace(go.Scatter(
-        x=dates, y=patents, 
-        name='📃 Патенты', 
+        x=dates, y=patents,
+        name='📃 Патенты',
         line=dict(color='#FF4B4B', width=4),
-        fill='tozeroy', 
+        fill='tozeroy',
         fillcolor='rgba(255,75,75,0.1)',
         yaxis='y2'
     ))
-    
+
     fig.update_layout(
         title=f"{domain_clean}: Наука vs Технологии",
         xaxis_title="Год",
@@ -456,30 +410,30 @@ with tab1:
         )
     )
     st.plotly_chart(fig, use_container_width=True)
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 🏭 Топ заявителей")
         top_df = pd.DataFrame({
-            'Компания': metrics['top_assignees'], 
+            'Компания': metrics['top_assignees'],
             'Патенты': metrics['assignee_values']
         })
         fig2 = px.bar(
-            top_df, x='Компания', y='Патенты', 
-            color='Патенты', 
+            top_df, x='Компания', y='Патенты',
+            color='Патенты',
             color_continuous_scale='Viridis'
         )
         fig2.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False
         )
         st.plotly_chart(fig2, use_container_width=True)
-    
+
     with col2:
         st.markdown("### 🌍 География")
         geo_df = pd.DataFrame({
-            'Страна': metrics['countries'], 
+            'Страна': metrics['countries'],
             'Доля': metrics['country_values']
         })
         fig3 = px.pie(
@@ -492,19 +446,19 @@ with tab1:
 
 with tab2:
     st.markdown(f"## 🔬 Подтехнологии в {domain_clean}")
-    
+
     if "Полупроводники" in domain:
         subtopics = ["Литография (EUV/DUV)", "Advanced Packaging", "GaN/SiC устройства", "MRAM/FRAM память", "Квантовые вычисления"]
         growth = [45, 38, 32, 28, 55]
     else:
         subtopics = ["CRISPR-Cas9", "CRISPR-Cas12/13", "Вирусные векторы (AAV)", "Липидные наночастицы", "CAR-T терапия"]
         growth = [52, 68, 41, 73, 47]
-    
+
     sub_df = pd.DataFrame({
-        'Технология': subtopics, 
+        'Технология': subtopics,
         'Рост за год (%)': growth
     })
-    
+
     fig4 = px.bar(
         sub_df, x='Технология', y='Рост за год (%)',
         color='Рост за год (%)',
@@ -512,14 +466,14 @@ with tab2:
         title="Темпы роста подтехнологий"
     )
     fig4.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)', 
+        plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)'
     )
     st.plotly_chart(fig4, use_container_width=True)
-    
+
     st.markdown("---")
     st.markdown("### 🔍 Детальный анализ")
-    
+
     for i, (sub, grow) in enumerate(zip(subtopics[:3], growth[:3])):
         with st.expander(f"📌 {sub} (Рост: +{grow}%)"):
             col1, col2 = st.columns(2)
@@ -534,28 +488,45 @@ with tab2:
 
 with tab3:
     st.markdown(f"## 📊 Данные по {domain_clean}")
-    
-    example_data = pd.DataFrame({
-        'Дата': dates[:20],
-        'Название': [f'{domain_clean} - публикация {i}' for i in range(20)],
-        'Цитирования': np.random.randint(10, 100, 20),
-        'Авторы': [f'Author {i}, Author {i+1}' for i in range(20)],
-        'Тип': ['Научная статья'] * 20
-    })
-    
-    st.dataframe(
-        example_data,
-        column_config={
-            "Дата": st.column_config.DateColumn("Дата публикации"),
-            "Цитирования": st.column_config.NumberColumn("Цитирований", format="%d ⭐"),
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-    
+
+    # Загружаем DataFrame для показа примеров
+    # (можно переиспользовать уже загруженный, но здесь для простоты загрузим снова)
+    domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
+    domain_key = domain_map.get(domain_clean, domain_clean.lower())
+    file_path = f"data/processed/{domain_key}_clean.parquet"
+    try:
+        df_sample = pd.read_parquet(file_path).head(20)
+        # Выбираем несколько колонок для отображения
+        display_cols = ['title', 'publication_date', 'cited_by_count', 'topic_name']
+        df_display = df_sample[[c for c in display_cols if c in df_sample.columns]]
+        st.dataframe(
+            df_display,
+            column_config={
+                "publication_date": st.column_config.DateColumn("Дата публикации"),
+                "cited_by_count": st.column_config.NumberColumn("Цитирований", format="%d ⭐"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    except Exception as e:
+        st.warning(f"Не удалось загрузить пример данных: {e}")
+        # Заглушка
+        example_data = pd.DataFrame({
+            'Дата': dates[:20],
+            'Название': [f'{domain_clean} - публикация {i}' for i in range(20)],
+            'Цитирования': np.random.randint(10, 100, 20),
+            'Авторы': [f'Author {i}, Author {i+1}' for i in range(20)],
+            'Тип': ['Научная статья'] * 20
+        })
+        st.dataframe(example_data, hide_index=True, use_container_width=True)
+
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        csv = example_data.to_csv(index=False).encode('utf-8')
+        # Скачать CSV (можно сформировать из текущего набора)
+        if 'df_display' in locals():
+            csv = df_display.to_csv(index=False).encode('utf-8')
+        else:
+            csv = example_data.to_csv(index=False).encode('utf-8')
         st.download_button(
             "📥 Скачать CSV",
             csv,
@@ -570,13 +541,13 @@ with tab3:
 
 with tab4:
     st.markdown("## 📄 Генерация отчетов")
-    
+
     if not PDF_AVAILABLE:
         st.error("⚠️ Для экспорта PDF установите библиотеки:")
         st.code("pip install reportlab matplotlib")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown("""
         <div style='background: linear-gradient(135deg, #667eea10, #764ba210); padding: 20px; border-radius: 10px; border: 1px solid #667eea30;'>
@@ -590,7 +561,7 @@ with tab4:
             <p>✅ Рекомендации</p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         if st.button("🔄 Сгенерировать Topic Card", key="topic_btn", use_container_width=True):
             with st.spinner("🔄 Генерация PDF отчета..."):
                 pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
@@ -604,7 +575,7 @@ with tab4:
                         mime="application/pdf",
                         use_container_width=True
                     )
-    
+
     with col2:
         st.markdown("""
         <div style='background: linear-gradient(135deg, #FF4B4B10, #FF6B6B10); padding: 20px; border-radius: 10px; border: 1px solid #FF4B4B30;'>
@@ -618,7 +589,7 @@ with tab4:
             <p>✅ Список "что читать"</p>
         </div>
         """, unsafe_allow_html=True)
-        
+
         if st.button("🔬 Сгенерировать Deep Dive", key="deep_btn", use_container_width=True):
             with st.spinner("🔄 Генерация детального отчета..."):
                 pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
@@ -632,10 +603,10 @@ with tab4:
                         mime="application/pdf",
                         use_container_width=True
                     )
-    
+
     st.markdown("---")
     st.markdown("### 📋 Быстрый экспорт")
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📊 Экспорт метрик в PDF", use_container_width=True):
@@ -673,8 +644,8 @@ st.markdown(f"""
 <div style='text-align: center; color: gray; padding: 20px;'>
     <p style='font-size: 1.2em;'>🚀 Data Science платформа мониторинга технологических трендов | MVP v1.0</p>
     <p style='font-size: 0.9em;'>
-        Текущий домен: {domain_clean} | 
-        Данные: OpenAlex, Google Patents | 
+        Текущий домен: {domain_clean} |
+        Данные: OpenAlex, Google Patents |
         Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}
     </p>
     <p style='font-size: 0.8em; color: #999;'>
@@ -682,19 +653,3 @@ st.markdown(f"""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
-import os
-import threading
-from pyngrok import ngrok
-
-# Функция запуска Streamlit
-def run_streamlit():
-    os.system("streamlit run app.py --server.port 8501 &")
-
-# Запускаем Streamlit в фоне
-thread = threading.Thread(target=run_streamlit)
-thread.start()
-
-# Открываем туннель через ngrok
-public_url = ngrok.connect(addr='8501', proto='http')
-print("🚀 Ваше приложение доступно по ссылке:", public_url)
