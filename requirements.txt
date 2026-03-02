@@ -3,8 +3,6 @@ pandas==2.2.3
 pyarrow==19.0.0
 matplotlib==3.8.0
 plotly==5.18.0
-<<<<<<< HEAD
 openpyxl==3.1.2
-=======
 openpyxl==3.1.2
->>>>>>> 1a90b1cf65e0b10740b211c4f00ed660dda84e39
+
