@@ -3,16 +3,9 @@ import numpy as np
 import os
 from datetime import datetime
 
-# Путь к папке с обработанными данными (относительно корня репозитория)
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data', 'processed')
 
 def load_domain_data(domain_clean):
-    """
-    Загружает данные для домена (Полупроводники / Генная инженерия)
-    и возвращает кортеж (dates, papers, patents, metrics) в формате,
-    совместимом с интерфейсом приложения.
-    """
-    # Маппинг названий из интерфейса на имена файлов
     domain_map = {
         'Полупроводники': 'semiconductors',
         'Генная инженерия': 'gene_engineering'
@@ -20,24 +13,17 @@ def load_domain_data(domain_clean):
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
     file_path = os.path.join(DATA_DIR, f"{domain_key}_clean.parquet")
 
-    # Если файл не найден, используем синтетическую заглушку (чтобы приложение не падало)
     if not os.path.exists(file_path):
         print(f"Файл {file_path} не найден. Используются синтетические данные.")
         return _fallback_domain_data(domain_clean)
 
-    # Загрузка реальных данных
     df = pd.read_parquet(file_path)
-
-    # Приводим даты и удаляем записи без даты
     df['publication_date'] = pd.to_datetime(df['publication_date'], errors='coerce')
     df = df.dropna(subset=['publication_date'])
-
-    # Агрегируем по месяцам
     df['month'] = df['publication_date'].dt.to_period('M')
     monthly = df.groupby('month').size().reset_index(name='papers')
     monthly['month'] = monthly['month'].dt.to_timestamp()
 
-    # Заполняем все месяцы от минимальной до максимальной даты
     if not monthly.empty:
         all_months = pd.date_range(
             start=monthly['month'].min(),
@@ -49,23 +35,15 @@ def load_domain_data(domain_clean):
         dates = monthly['month'].values
         papers = monthly['papers'].values
     else:
-        # Если данных нет, создаём пустой ряд за последние 5 лет
         dates = pd.date_range(start='2020-01-01', end='2025-01-01', freq='M')
         papers = np.zeros(len(dates))
 
-    # Патенты пока отсутствуют (заглушка)
     patents = np.zeros_like(papers)
-
-    # Вычисляем метрики
     metrics = _compute_metrics(domain_clean, df, monthly)
-
     return dates, papers, patents, metrics
 
 def _compute_metrics(domain_clean, df, monthly):
-    """Вычисляет ключевые метрики на основе реальных данных."""
     total_papers = len(df)
-
-    # Годовой прирост (YoY) – сравниваем последний полный год с предыдущим
     df['year'] = df['publication_date'].dt.year
     yearly = df.groupby('year').size()
     years = sorted(yearly.index)
@@ -76,14 +54,7 @@ def _compute_metrics(domain_clean, df, monthly):
     else:
         papers_growth = 0.0
 
-    # Метрики, которые пока берутся из демо-данных (будут заменены после интеграции патентов)
-    patents_total = 0
-    patents_growth = 0
-    time_lag = 0
-    time_lag_change = 0
-
-    # Trend Score (простая формула: комбинация общего объёма и роста)
-    norm_total = min(100, total_papers / 5000 * 100)   # 5000 – порог для максимума
+    norm_total = min(100, total_papers / 5000 * 100)
     norm_growth = min(100, max(0, papers_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
 
@@ -94,7 +65,6 @@ def _compute_metrics(domain_clean, df, monthly):
     else:
         trend_status = '💤 Mature'
 
-    # Топ-заявители, география и AI-интеграция – пока демо-данные
     if 'Полупроводники' in domain_clean:
         top_assignees = ['TSMC', 'Intel', 'Samsung', 'Qualcomm', 'Micron']
         assignee_values = [234, 189, 156, 98, 76]
@@ -111,10 +81,10 @@ def _compute_metrics(domain_clean, df, monthly):
     metrics = {
         'papers_total': total_papers,
         'papers_growth': round(papers_growth, 1),
-        'patents_total': patents_total,
-        'patents_growth': patents_growth,
-        'time_lag': time_lag,
-        'time_lag_change': time_lag_change,
+        'patents_total': 0,
+        'patents_growth': 0,
+        'time_lag': 0,
+        'time_lag_change': 0,
         'trend_score': trend_score,
         'trend_status': trend_status,
         'top_assignees': top_assignees,
@@ -126,7 +96,6 @@ def _compute_metrics(domain_clean, df, monthly):
     return metrics
 
 def _fallback_domain_data(domain_clean):
-    """Заглушка: генерирует синтетические данные, если файл не найден."""
     if "Полупроводники" in domain_clean:
         dates = pd.date_range(start='2018-01-01', end='2025-01-01', freq='M')
         np.random.seed(42)
