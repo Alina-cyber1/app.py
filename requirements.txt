@@ -1,8 +1,8 @@
 streamlit==1.43.0
 pandas==2.2.3
 pyarrow==19.0.0
+fastparquet==2024.5.0
 matplotlib==3.8.0
 plotly==5.18.0
 openpyxl==3.1.2
-openpyxl==3.1.2
-
+numpy==1.26.4
