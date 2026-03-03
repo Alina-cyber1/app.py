@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -9,29 +9,20 @@ print("🔄 Создаю файлы с данными...")
 os.makedirs('data/processed', exist_ok=True)
 
 def create_realistic_data(domain, num_papers, start_year=2010, end_year=2025):
-    """Создает реалистичные данные с правильной структурой"""
+    """Создает реалистичные данные"""
     np.random.seed(42 if domain == 'semiconductors' else 123)
     data = []
     
-    # Темы для разных доменов
-    semiconductor_topics = [
-        'CMOS technology', 'FinFET devices', 'EUV lithography', 
-        'GaN semiconductors', 'SiC power devices', 'Quantum dots', 
-        '2D materials', 'Memristors', 'Spintronics', 'Advanced packaging'
-    ]
+    semiconductor_topics = ['CMOS technology', 'FinFET devices', 'EUV lithography', 'GaN semiconductors', 
+                           'SiC power devices', 'Quantum dots', '2D materials', 'Memristors', 
+                           'Spintronics', 'Advanced packaging']
     
-    gene_topics = [
-        'CRISPR-Cas9', 'Gene therapy', 'CAR-T cells', 'mRNA vaccines', 
-        'Base editing', 'Prime editing', 'AAV vectors', 
-        'Lipid nanoparticles', 'Stem cells', 'Epigenetics'
-    ]
+    gene_topics = ['CRISPR-Cas9', 'Gene therapy', 'CAR-T cells', 'mRNA vaccines', 
+                  'Base editing', 'Prime editing', 'AAV vectors', 'Lipid nanoparticles', 
+                  'Stem cells', 'Epigenetics']
     
-    institutes = [
-        'MIT', 'Stanford University', 'Harvard University', 
-        'University of Cambridge', 'Tsinghua University', 
-        'Max Planck Institute', 'ETH Zurich', 'University of Tokyo', 
-        'Caltech', 'University of Oxford'
-    ]
+    institutes = ['MIT', 'Stanford', 'Harvard', 'Cambridge', 'Tsinghua', 
+                  'Max Planck', 'ETH Zurich', 'Tokyo', 'Caltech', 'Oxford']
     
     topics = semiconductor_topics if domain == 'semiconductors' else gene_topics
     
@@ -42,75 +33,40 @@ def create_realistic_data(domain, num_papers, start_year=2010, end_year=2025):
         date = datetime(year, month, day)
         topic = np.random.choice(topics)
         
-        # Генерируем заголовок
-        verbs = ['advances in', 'novel approach to', 'review of', 
-                 'breakthrough in', 'study of']
-        adj = ['high-performance', 'efficient', 'scalable', 
-               'robust', 'integrated']
+        # Простой заголовок
+        title = f"Paper on {topic} - {np.random.randint(1000, 9999)}"
         
-        title_parts = [
-            f"{np.random.choice(verbs).capitalize()} {topic}",
-            f"{np.random.choice(adj)} {topic} for {np.random.choice(['applications', 'devices', 'systems'])}",
-            f"{topic}: {np.random.choice(['a comprehensive review', 'recent progress', 'future perspectives'])}"
-        ]
-        title = np.random.choice(title_parts)
-        
-        # Генерируем авторов
-        num_authors = np.random.randint(1, 6)
-        authors = []
-        for j in range(num_authors):
-            first = chr(65 + np.random.randint(0, 26))
-            last = chr(65 + np.random.randint(0, 26))
-            authors.append(f"{first}. {last}.")
+        # Авторы
+        num_authors = np.random.randint(1, 4)
+        authors = [f"Author {chr(65 + np.random.randint(0, 26))}" for _ in range(num_authors)]
         authors_str = ', '.join(authors)
         
         institute = np.random.choice(institutes)
         
-        # Количество цитирований (больше для старых статей)
-        age_factor = 1 - (year - start_year) / (end_year - start_year)
-        citations = int(np.random.poisson(20 * age_factor) + np.random.randint(0, 10))
-        
-        # Генерируем ID
-        doi = f"10.1016/j.{domain}.{year}.{np.random.randint(1000, 9999)}"
-        openalex_id = f"https://openalex.org/W{np.random.randint(1000000, 9999999)}"
+        # Цитирования
+        citations = np.random.poisson(10) + np.random.randint(0, 20)
         
         data.append({
-            'id': openalex_id,
-            'title': title,
             'publication_date': date.strftime('%Y-%m-%d'),
-            'year': year,
+            'title': title,
             'cited_by_count': citations,
-            'doi': doi,
-            'type': 'article',
-            'domain': domain,
             'authors': authors_str,
             'institution': institute,
-            'topic': topic,
-            'abstract': f"This paper presents {np.random.choice(verbs)} in {topic}..."
+            'topic': topic
         })
     
     df = pd.DataFrame(data)
     return df.sort_values('publication_date')
 
-# Полупроводники
+# Создаем данные
 print("📊 Создаю данные для полупроводников...")
-df_semi = create_realistic_data('semiconductors', 5000)
-
-# Сохраняем с явным указанием версии Parquet
-table = pa.Table.from_pandas(df_semi)
-pq.write_table(table, 'data/processed/semiconductors_clean.parquet', 
-               version='2.6', compression='snappy')
+df_semi = create_realistic_data('semiconductors', 1000)  # Уменьшил для скорости
+df_semi.to_parquet('data/processed/semiconductors_clean.parquet', engine='pyarrow', index=False)
 print(f"✅ Сохранено {len(df_semi)} статей")
 
-# Генная инженерия
 print("🧬 Создаю данные для генной инженерии...")
-df_gene = create_realistic_data('gene_engineering', 3500)
-
-# Сохраняем с явным указанием версии Parquet
-table = pa.Table.from_pandas(df_gene)
-pq.write_table(table, 'data/processed/gene_engineering_clean.parquet', 
-               version='2.6', compression='snappy')
+df_gene = create_realistic_data('gene_engineering', 800)  # Уменьшил для скорости
+df_gene.to_parquet('data/processed/gene_engineering_clean.parquet', engine='pyarrow', index=False)
 print(f"✅ Сохранено {len(df_gene)} статей")
 
-print("\n🎉 Готово! Файлы созданы в папке data/processed/")
-print("📁 Теперь можно запустить: streamlit run app.py")
+print("\n🎉 Готово!")
