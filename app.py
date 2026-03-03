@@ -20,6 +20,7 @@ st.set_page_config(
 )
 
 # ========== ИМПОРТЫ ДЛЯ PDF ==========
+PDF_AVAILABLE = False
 try:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter, A4
@@ -27,9 +28,10 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     PDF_AVAILABLE = True
-except ImportError:
+    print("✅ ReportLab успешно импортирован")
+except ImportError as e:
+    print(f"❌ Ошибка импорта ReportLab: {e}")
     PDF_AVAILABLE = False
-    st.warning("⚠️ Для экспорта PDF установите: pip install reportlab matplotlib")
 
 # ========== КРАСИВЫЙ CSS ==========
 st.markdown("""
@@ -584,9 +586,26 @@ with tab3:
 with tab4:
     st.markdown("## 📄 Генерация отчетов")
 
+    # Проверяем наличие библиотек для PDF
     if not PDF_AVAILABLE:
-        st.error("⚠️ Для экспорта PDF установите библиотеки:")
+        st.error("⚠️ Для экспорта PDF необходимо установить библиотеки:")
         st.code("pip install reportlab matplotlib")
+        
+        # Показываем текущий статус
+        with st.expander("🔍 Диагностика"):
+            st.write("Текущие установленные пакеты:")
+            import sys
+            import subprocess
+            try:
+                result = subprocess.run([sys.executable, '-m', 'pip', 'list'], 
+                                      capture_output=True, text=True)
+                st.text(result.stdout[:500] + "...")
+            except:
+                st.write("Не удалось получить список пакетов")
+        
+        st.info("💡 После установки библиотек перезапустите приложение")
+    else:
+        st.success("✅ Библиотеки для PDF установлены")
 
     col1, col2 = st.columns(2)
 
@@ -605,18 +624,22 @@ with tab4:
         """, unsafe_allow_html=True)
 
         if st.button("🔄 Сгенерировать Topic Card", key="topic_btn", use_container_width=True):
-            with st.spinner("🔄 Генерация PDF отчета..."):
-                pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
-                if pdf_buffer:
-                    st.success("✅ Topic Card готов!")
-                    st.balloons()
-                    st.download_button(
-                        label="📥 Скачать PDF-отчет",
-                        data=pdf_buffer,
-                        file_name=f"topic_card_{domain_clean.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+            if PDF_AVAILABLE:
+                with st.spinner("🔄 Генерация PDF отчета..."):
+                    pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
+                    if pdf_buffer:
+                        st.success("✅ Topic Card готов!")
+                        st.balloons()
+                        st.download_button(
+                            label="📥 Скачать PDF-отчет",
+                            data=pdf_buffer,
+                            file_name=f"topic_card_{domain_clean.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+            else:
+                st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
+                st.info("💡 Выполните команду: pip install reportlab matplotlib")
 
     with col2:
         st.markdown("""
@@ -633,18 +656,22 @@ with tab4:
         """, unsafe_allow_html=True)
 
         if st.button("🔬 Сгенерировать Deep Dive", key="deep_btn", use_container_width=True):
-            with st.spinner("🔄 Генерация детального отчета..."):
-                pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
-                if pdf_buffer:
-                    st.success("✅ Deep Dive отчет готов!")
-                    st.snow()
-                    st.download_button(
-                        label="📥 Скачать PDF (Deep Dive)",
-                        data=pdf_buffer,
-                        file_name=f"deep_dive_{domain_clean.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+            if PDF_AVAILABLE:
+                with st.spinner("🔄 Генерация детального отчета..."):
+                    pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
+                    if pdf_buffer:
+                        st.success("✅ Deep Dive отчет готов!")
+                        st.snow()
+                        st.download_button(
+                            label="📥 Скачать PDF (Deep Dive)",
+                            data=pdf_buffer,
+                            file_name=f"deep_dive_{domain_clean.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+            else:
+                st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
+                st.info("💡 Выполните команду: pip install reportlab matplotlib")
 
     st.markdown("---")
     st.markdown("### 📋 Быстрый экспорт")
@@ -652,16 +679,19 @@ with tab4:
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📊 Экспорт метрик в PDF", use_container_width=True):
-            with st.spinner("🔄 Генерация PDF..."):
-                pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
-                if pdf_buffer:
-                    st.download_button(
-                        label="📥 Скачать PDF",
-                        data=pdf_buffer,
-                        file_name=f"metrics_{domain_clean.lower().replace(' ', '_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+            if PDF_AVAILABLE:
+                with st.spinner("🔄 Генерация PDF..."):
+                    pdf_buffer = generate_pdf_report(domain_clean, metrics, dates, papers, patents)
+                    if pdf_buffer:
+                        st.download_button(
+                            label="📥 Скачать PDF",
+                            data=pdf_buffer,
+                            file_name=f"metrics_{domain_clean.lower().replace(' ', '_')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+            else:
+                st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
     with col2:
         timeline_data = pd.DataFrame({
             'Дата': dates,
