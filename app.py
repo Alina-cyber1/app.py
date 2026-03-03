@@ -488,7 +488,7 @@ with tab2:
 
 with tab3:
     st.markdown(f"## 📊 Реальные данные по {domain_clean}")
-
+    
     # Загружаем DataFrame для показа примеров
     domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
@@ -497,129 +497,89 @@ with tab3:
     try:
         # Проверяем существование файла
         if os.path.exists(file_path):
-            # Пытаемся загрузить реальные данные
-            df_sample = pd.read_parquet(file_path)
-            st.success(f"✅ Загружено {len(df_sample):,} записей из реальных данных")
-            
-            # Выбираем колонки для отображения
-            display_cols = ['publication_date', 'title', 'authors', 'topic', 'citations', 'affiliation']
-            available_cols = [col for col in display_cols if col in df_sample.columns]
-            
-            if not available_cols:
-                available_cols = df_sample.columns[:5].tolist()
-            
-            df_display = df_sample[available_cols].head(20)
-            
-            # Переименовываем колонки для красивого отображения
-            column_names = {
-                'publication_date': 'Дата публикации',
-                'title': 'Название',
-                'authors': 'Авторы',
-                'topic': 'Тема',
-                'citations': 'Цитирования',
-                'affiliation': 'Организация'
-            }
-            
-            # Создаем словарь для переименования только существующих колонок
-            rename_dict = {col: column_names.get(col, col) for col in df_display.columns if col in column_names}
-            df_display = df_display.rename(columns=rename_dict)
-            
-            # Отображаем DataFrame
-            st.dataframe(
-                df_display,
-                column_config={
-                    "Дата публикации": st.column_config.DateColumn("Дата публикации"),
-                    "Цитирования": st.column_config.NumberColumn("Цитирований", format="%d ⭐"),
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+            # Загружаем реальные данные
+            df_real = pd.read_parquet(file_path, engine='fastparquet')
+            st.success(f"✅ Загружено {len(df_real):,} записей из РЕАЛЬНЫХ данных")
             
             # Показываем статистику
-            st.markdown("### 📊 Статистика данных")
+            st.markdown("### 📊 Статистика реальных данных")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Всего записей", f"{len(df_sample):,}")
+                st.metric("Всего записей", f"{len(df_real):,}")
             with col2:
-                if 'topic' in df_sample.columns:
-                    st.metric("Уникальных тем", df_sample['topic'].nunique())
+                if 'topic' in df_real.columns:
+                    st.metric("Уникальных тем", df_real['topic'].nunique())
                 else:
                     st.metric("Уникальных тем", "N/A")
             with col3:
-                if 'affiliation' in df_sample.columns:
-                    st.metric("Организаций", df_sample['affiliation'].nunique())
-                elif 'authors' in df_sample.columns:
-                    st.metric("Уникальных авторов", df_sample['authors'].nunique())
+                if 'affiliation' in df_real.columns:
+                    st.metric("Организаций", df_real['affiliation'].nunique())
                 else:
                     st.metric("Организаций", "N/A")
             with col4:
-                if 'year' in df_sample.columns:
-                    st.metric("Годы", f"{df_sample['year'].min()} - {df_sample['year'].max()}")
-                elif 'publication_date' in df_sample.columns:
-                    years = pd.to_datetime(df_sample['publication_date']).dt.year
-                    st.metric("Годы", f"{years.min()} - {years.max()}")
+                if 'year' in df_real.columns:
+                    st.metric("Годы", f"{df_real['year'].min()} - {df_real['year'].max()}")
                 else:
                     st.metric("Годы", "N/A")
-                    
-        else:
-            st.warning(f"⚠️ Файл с данными не найден: {file_path}")
-            st.info("🔄 Показываем синтетические данные для демонстрации")
             
-            # Показываем синтетические данные
-            example_data = pd.DataFrame({
-                'Дата': dates[:20],
-                'Название': [f'{domain_clean} - публикация {i}' for i in range(20)],
-                'Цитирования': np.random.randint(10, 100, 20),
-                'Авторы': [f'Author {i}, Author {i+1}' for i in range(20)],
-                'Тип': ['Научная статья'] * 20
-            })
-            st.dataframe(example_data, hide_index=True, use_container_width=True)
+            # Показываем примеры данных
+            st.markdown("### 📋 Примеры реальных записей")
+            display_cols = ['publication_date', 'title', 'authors', 'topic', 'citations', 'affiliation']
+            available_cols = [col for col in display_cols if col in df_real.columns]
+            
+            if available_cols:
+                df_display = df_real[available_cols].head(10)
+                
+                # Переименовываем колонки для красивого отображения
+                column_names = {
+                    'publication_date': 'Дата',
+                    'title': 'Название',
+                    'authors': 'Авторы',
+                    'topic': 'Тема',
+                    'citations': 'Цитирования',
+                    'affiliation': 'Организация'
+                }
+                df_display = df_display.rename(columns={col: column_names.get(col, col) for col in df_display.columns})
+                
+                st.dataframe(df_display, hide_index=True, use_container_width=True)
+                
+                # Кнопки для скачивания
+                st.markdown("### 📥 Экспорт данных")
+                col1, col2, col3 = st.columns([1, 1, 2])
+                
+                with col1:
+                    csv = df_real.head(100).to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Скачать реальные данные (CSV)",
+                        csv,
+                        f"{domain_key}_real_data.csv",
+                        "text/csv",
+                        use_container_width=True
+                    )
+                
+                with col2:
+                    if st.button("📊 Экспорт в Excel", disabled=True, use_container_width=True):
+                        st.info("Функция в разработке")
+                
+                with col3:
+                    st.info(f"📈 AI-интеграция в домене: {metrics['ai_share']}% патентов содержат G06N*")
+            else:
+                st.warning("⚠️ Не найдены колонки для отображения")
+        else:
+            st.error(f"❌ Файл с данными не найден: {file_path}")
             
     except Exception as e:
-        st.error(f"❌ Ошибка загрузки данных: {str(e)}")
-        st.info("🔄 Показываем синтетические данные для демонстрации")
+        st.error(f"❌ Ошибка загрузки реальных данных: {str(e)}")
+        st.info("💡 Проверьте логи приложения для деталей")
         
-        # Показываем синтетические данные при ошибке
-        example_data = pd.DataFrame({
-            'Дата': dates[:20],
-            'Название': [f'{domain_clean} - публикация {i}' for i in range(20)],
-            'Цитирования': np.random.randint(10, 100, 20),
-            'Авторы': [f'Author {i}, Author {i+1}' for i in range(20)],
-            'Тип': ['Научная статья'] * 20
-        })
-        st.dataframe(example_data, hide_index=True, use_container_width=True)
-
-    # Кнопки для скачивания
-    st.markdown("### 📥 Экспорт данных")
-    col1, col2, col3 = st.columns([1, 1, 2])
-    
-    with col1:
-        # Кнопка скачивания CSV
-        if 'df_sample' in locals() and len(df_sample) > 0:
-            csv = df_sample.head(100).to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Скачать CSV (первые 100 записей)",
-                csv,
-                f"{domain_key}_sample.csv",
-                "text/csv",
-                use_container_width=True
-            )
-        else:
-            csv = example_data.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Скачать CSV",
-                csv,
-                f"{domain_key}_sample.csv",
-                "text/csv",
-                use_container_width=True
-            )
-    
-    with col2:
-        if st.button("📊 Экспорт в Excel", disabled=True, use_container_width=True):
-            st.info("Функция в разработке")
-    
-    with col3:
-        st.info(f"📈 AI-интеграция в домене: {metrics['ai_share']}% патентов содержат G06N*")
+        # Показываем содержимое лога для диагностики
+        with st.expander("🔍 Диагностическая информация"):
+            st.code(f"""
+            Путь к файлу: {file_path}
+            Файл существует: {os.path.exists(file_path)}
+            Размер файла: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'} байт
+            Ошибка: {str(e)}
+            """)
 
 with tab4:
     st.markdown("## 📄 Генерация отчетов")
