@@ -6,3 +6,4 @@ matplotlib==3.8.0
 plotly==5.18.0
 openpyxl==3.1.2
 numpy==1.26.4
+reportlab==4.2.2
