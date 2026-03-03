@@ -8,10 +8,14 @@ on:
 jobs:
   create-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
+        with:
+          fetch-depth: 0
+          
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -22,13 +26,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas pyarrow numpy
           
+      - name: Create data directory
+        run: mkdir -p data/processed
+          
       - name: Run create_data.py
         run: python create_data.py
         
       - name: Commit and push new data files
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data/processed/*.parquet
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-generate data files"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-generate data files"
+            git push
+          fi
