@@ -8,7 +8,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data', 'processed')
 def load_domain_data(domain_clean):
     """
     Загружает данные для выбранного домена.
-    Если файл не найден - использует синтетические данные.
+    Если файл не найден или поврежден - использует синтетические данные.
     """
     domain_map = {
         'Полупроводники': 'semiconductors',
@@ -21,14 +21,28 @@ def load_domain_data(domain_clean):
     
     # Пробуем загрузить данные из файла
     if os.path.exists(file_path):
-        try:
-            df = pd.read_parquet(file_path)
-            print(f"✅ Файл прочитан, строк: {len(df)}")
-            return _process_dataframe(df, domain_clean)
-        except Exception as e:
-            print(f"❌ Ошибка чтения файла: {e}")
-            print("🔄 Использую синтетические данные...")
-            return _generate_synthetic_data(domain_clean)
+        # Пробуем разные движки для чтения
+        engines = ['pyarrow', 'fastparquet']
+        
+        for engine in engines:
+            try:
+                df = pd.read_parquet(file_path, engine=engine)
+                print(f"✅ Файл прочитан через {engine}, строк: {len(df)}")
+                
+                # Обрабатываем DataFrame
+                return _process_dataframe(df, domain_clean)
+                
+            except ImportError:
+                print(f"⚠️ {engine} не установлен, пробуем другой...")
+                continue
+            except Exception as e:
+                print(f"❌ Ошибка чтения через {engine}: {e}")
+                continue
+        
+        # Если ни один движок не сработал
+        print("❌ Не удалось прочитать файл ни одним движком")
+        print("🔄 Использую синтетические данные...")
+        return _generate_synthetic_data(domain_clean)
     else:
         print(f"❌ Файл {file_path} не найден")
         print("🔄 Генерирую синтетические данные...")
@@ -39,14 +53,20 @@ def _process_dataframe(df, domain_clean):
     
     # Проверяем наличие колонки publication_date
     if 'publication_date' not in df.columns:
-        print("⚠️ Нет колонки publication_date")
-        return _generate_synthetic_data(domain_clean)
+        print("⚠️ Нет колонки publication_date, ищем альтернативы...")
+        # Ищем колонку с датой
+        date_cols = [col for col in df.columns if 'date' in col.lower() or 'year' in col.lower()]
+        if date_cols:
+            df['publication_date'] = pd.to_datetime(df[date_cols[0]], errors='coerce')
+        else:
+            print("⚠️ Не найдено колонок с датами")
+            return _generate_synthetic_data(domain_clean)
     
     df['publication_date'] = pd.to_datetime(df['publication_date'], errors='coerce')
     df = df.dropna(subset=['publication_date'])
     
     if len(df) == 0:
-        print("⚠️ Нет данных после обработки")
+        print("⚠️ Нет данных после обработки дат")
         return _generate_synthetic_data(domain_clean)
     
     # Группируем по месяцам
