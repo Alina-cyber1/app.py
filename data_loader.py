@@ -8,7 +8,6 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data', 'processed')
 def load_domain_data(domain_clean):
     """
     Загружает данные для выбранного домена.
-    Если файл не найден или поврежден - использует синтетические данные.
     """
     domain_map = {
         'Полупроводники': 'semiconductors',
@@ -18,31 +17,34 @@ def load_domain_data(domain_clean):
     file_path = os.path.join(DATA_DIR, f"{domain_key}_clean.parquet")
     
     print(f"🔍 Загрузка данных из: {file_path}")
+    print(f"📁 Размер файла: {os.path.getsize(file_path) if os.path.exists(file_path) else 'Файл не найден'} байт")
     
     # Пробуем загрузить данные из файла
     if os.path.exists(file_path):
-        # Пробуем разные движки для чтения
-        engines = ['pyarrow', 'fastparquet']
-        
-        for engine in engines:
+        try:
+            # Читаем файл
+            df = pd.read_parquet(file_path, engine='pyarrow')
+            print(f"✅ Файл прочитан через pyarrow, строк: {len(df)}")
+            print(f"📊 Колонки: {list(df.columns)}")
+            
+            # Обрабатываем DataFrame
+            return _process_dataframe(df, domain_clean)
+            
+        except Exception as e:
+            print(f"❌ Ошибка чтения через pyarrow: {e}")
+            
             try:
-                df = pd.read_parquet(file_path, engine=engine)
-                print(f"✅ Файл прочитан через {engine}, строк: {len(df)}")
+                # Пробуем fastparquet как запасной вариант
+                df = pd.read_parquet(file_path, engine='fastparquet')
+                print(f"✅ Файл прочитан через fastparquet, строк: {len(df)}")
+                print(f"📊 Колонки: {list(df.columns)}")
                 
-                # Обрабатываем DataFrame
                 return _process_dataframe(df, domain_clean)
                 
-            except ImportError:
-                print(f"⚠️ {engine} не установлен, пробуем другой...")
-                continue
             except Exception as e:
-                print(f"❌ Ошибка чтения через {engine}: {e}")
-                continue
-        
-        # Если ни один движок не сработал
-        print("❌ Не удалось прочитать файл ни одним движком")
-        print("🔄 Использую синтетические данные...")
-        return _generate_synthetic_data(domain_clean)
+                print(f"❌ Ошибка чтения через fastparquet: {e}")
+                print("🔄 Использую синтетические данные...")
+                return _generate_synthetic_data(domain_clean)
     else:
         print(f"❌ Файл {file_path} не найден")
         print("🔄 Генерирую синтетические данные...")
@@ -53,14 +55,12 @@ def _process_dataframe(df, domain_clean):
     
     # Проверяем наличие колонки publication_date
     if 'publication_date' not in df.columns:
-        print("⚠️ Нет колонки publication_date, ищем альтернативы...")
+        print("⚠️ Нет колонки publication_date, использую первую колонку с датой")
         # Ищем колонку с датой
-        date_cols = [col for col in df.columns if 'date' in col.lower() or 'year' in col.lower()]
-        if date_cols:
-            df['publication_date'] = pd.to_datetime(df[date_cols[0]], errors='coerce')
-        else:
-            print("⚠️ Не найдено колонок с датами")
-            return _generate_synthetic_data(domain_clean)
+        for col in df.columns:
+            if 'date' in col.lower() or 'year' in col.lower():
+                df['publication_date'] = pd.to_datetime(df[col], errors='coerce')
+                break
     
     df['publication_date'] = pd.to_datetime(df['publication_date'], errors='coerce')
     df = df.dropna(subset=['publication_date'])
@@ -84,6 +84,8 @@ def _process_dataframe(df, domain_clean):
         monthly.columns = ['month', 'papers']
         dates = monthly['month'].values
         papers = monthly['papers'].values
+        print(f"📈 Диапазон дат: {dates[0]} - {dates[-1]}")
+        print(f"📊 Всего публикаций: {papers.sum()}")
     else:
         dates = pd.date_range(start='2020-01-01', end='2025-01-01', freq='MS')
         papers = np.zeros(len(dates))
@@ -138,15 +140,18 @@ def _generate_synthetic_data(domain_clean):
     papers = np.maximum(0, np.round(papers)).astype(int)
     patents = np.zeros_like(papers)
     
+    print(f"✅ Сгенерировано {len(dates)} точек данных (синтетика)")
     return dates, papers, patents, metrics
 
 def _compute_metrics(domain_clean, df):
     """Вычисляет метрики"""
     total_papers = len(df)
+    print(f"📊 Вычисляю метрики для {total_papers} записей")
     
     # Годовой рост
     df['year'] = df['publication_date'].dt.year
     yearly = df.groupby('year').size()
+    print(f"📅 Распределение по годам: {dict(yearly)}")
     
     if len(yearly) >= 2:
         years = sorted(yearly.index)
@@ -202,4 +207,5 @@ def _compute_metrics(domain_clean, df):
             'ai_share': 18
         }
     
+    print(f"📈 Trend Score: {trend_score}, Статус: {trend_status}")
     return metrics
