@@ -4,11 +4,10 @@ import numpy as np
 from pathlib import Path
 import gdown
 
-# ---------- Константы ----------
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ID файлов на Google Drive (clean-датасеты)
+# Здесь можно оставить текущие файлы, или заменить на *_clean_signal.parquet
 FILES = {
     "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
     "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl"
@@ -44,11 +43,12 @@ def load_domain_data(domain_clean):
     print(f"✅ Загружено строк: {len(df)}")
     print(f"📋 Колонки: {list(df.columns)}")
 
-    # Разделяем публикации и патенты, если есть колонка type
+    # Пытаемся разделить публикации и патенты, если есть колонка type
     if 'type' in df.columns:
         publications = df[df['type'] == 'publication'].copy()
         patents_df = df[df['type'] == 'patent'].copy()
     else:
+        # Если нет type, считаем всё публикациями (или можно попробовать другие признаки)
         publications = df.copy()
         patents_df = pd.DataFrame()
 
@@ -88,28 +88,6 @@ def load_domain_data(domain_clean):
     else:
         monthly_patents = pd.DataFrame(columns=['month', 'patents'])
 
-    # --- Если нет ни публикаций, ни патентов, возвращаем нулевые данные, но с корректными метриками ---
-    if monthly_pubs.empty and monthly_patents.empty:
-        # Создаём хотя бы одну точку, чтобы даты не были пустыми (иначе app.py упадёт)
-        # Возвращаем пустые массивы, а app.js обработает это через проверку data_available
-        # Но для совместимости вернём пустые массивы и словарь с нулями
-        empty_metrics = {
-            'papers_total': 0,
-            'papers_growth': 0.0,
-            'patents_total': 0,
-            'patents_growth': 0.0,
-            'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
-            'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
-            'trend_score': 0,
-            'trend_status': '💤 Mature',
-            'top_assignees': ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"] if domain_clean == "Полупроводники" else ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"],
-            'assignee_values': [234, 189, 156, 98, 76] if domain_clean == "Полупроводники" else [145, 132, 98, 67, 54],
-            'countries': ['US', 'CN', 'JP', 'KR', 'EP'] if domain_clean == "Полупроводники" else ['US', 'CN', 'EP', 'JP', 'KR'],
-            'country_values': [45, 25, 12, 10, 8] if domain_clean == "Полупроводники" else [58, 18, 12, 7, 5],
-            'ai_share': 32 if domain_clean == "Полупроводники" else 18
-        }
-        return np.array([]), np.array([]), np.array([]), empty_metrics
-
     # --- Определяем общий диапазон дат ---
     all_months = pd.date_range(
         start=min(monthly_pubs['month'].min() if not monthly_pubs.empty else pd.Timestamp('2015-01-01'),
@@ -139,6 +117,26 @@ def load_domain_data(domain_clean):
 
     total_papers = papers.sum()
     total_patents = patents.sum()
+
+    # --- Если нет ни одной публикации и ни одного патента, возвращаем пустые данные с заглушками ---
+    if total_papers == 0 and total_patents == 0:
+        empty_metrics = {
+            'papers_total': 0,
+            'papers_growth': 0.0,
+            'patents_total': 0,
+            'patents_growth': 0.0,
+            'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
+            'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
+            'trend_score': 0,
+            'trend_status': '💤 Mature',
+            'top_assignees': ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"] if domain_clean == "Полупроводники" else ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"],
+            'assignee_values': [234, 189, 156, 98, 76] if domain_clean == "Полупроводники" else [145, 132, 98, 67, 54],
+            'countries': ['US', 'CN', 'JP', 'KR', 'EP'] if domain_clean == "Полупроводники" else ['US', 'CN', 'EP', 'JP', 'KR'],
+            'country_values': [45, 25, 12, 10, 8] if domain_clean == "Полупроводники" else [58, 18, 12, 7, 5],
+            'ai_share': 32 if domain_clean == "Полупроводники" else 18
+        }
+        # Возвращаем пустые dates, чтобы app.py показал предупреждение
+        return np.array([]), np.array([]), np.array([]), empty_metrics
 
     # --- Метрики роста ---
     yearly_pubs = monthly.groupby(monthly['month'].dt.year)['papers'].sum()
@@ -183,7 +181,7 @@ def load_domain_data(domain_clean):
             countries = ['US', 'CN', 'EP', 'JP', 'KR']
             country_values = [58, 18, 12, 7, 5]
 
-    # Trend score
+    # Trend score (адаптируем под патенты)
     norm_total = min(100, total_patents / 5000 * 100)
     norm_growth = min(100, max(0, patents_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
