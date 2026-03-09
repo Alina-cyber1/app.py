@@ -71,7 +71,7 @@ def load_domain_data(domain_clean):
             WHERE {cpc_condition}
         )
         SELECT 
-            DATE_TRUNC('month', to_timestamp(p.priority_date))::DATE AS month,
+            DATE_TRUNC('month', to_timestamp(p.priority_date / 1000))::DATE AS month,
             COUNT(DISTINCT p.family_id) AS patent_count
         FROM patents p
         JOIN domain_pubs dp ON p.publication_number = dp.publication_number
