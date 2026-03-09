@@ -20,12 +20,10 @@ FILES = {
 _download_attempted = False
 
 def _download_files():
-    """Скачивает файлы, если их нет. Вызывается внутри load_domain_data."""
     global _download_attempted
     if _download_attempted:
         return
     _download_attempted = True
-    
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
@@ -42,7 +40,6 @@ def _download_files():
                 print(f"❌ Ошибка скачивания {filename}: {e}")
 
 def _generate_fallback_data():
-    """Возвращает тестовые данные, если реальные недоступны."""
     print("⚠️ Использую ТЕСТОВЫЕ данные (fallback)")
     dates = np.array(['2020-01', '2020-02', '2020-03', '2020-04', '2020-05'])
     papers = np.array([10, 15, 20, 25, 30])
@@ -67,16 +64,9 @@ def _generate_fallback_data():
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
-    """
-    Загружает данные для указанного домена.
-    При ошибках возвращает тестовые данные, но перед этим подробно логирует.
-    """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
-    
-    # Пытаемся скачать файлы (только один раз)
     _download_files()
 
-    # Определяем файл для данного домена
     if domain_clean == "Полупроводники":
         data_file = DATA_DIR / "semiconductors_clean.parquet"
     elif domain_clean == "Генная инженерия":
@@ -85,26 +75,25 @@ def load_domain_data(domain_clean):
         print(f"❌ Неизвестный домен: {domain_clean}")
         return _generate_fallback_data()
 
-    # Проверяем наличие файла
     if not data_file.exists():
         print(f"❌ Файл {data_file} не найден")
         return _generate_fallback_data()
-    
+
     size_mb = data_file.stat().st_size / (1024*1024)
     print(f"✅ Файл найден: {data_file} ({size_mb:.1f} MB)")
 
     try:
         con = duckdb.connect()
-        
-        # ----- Диагностика: какие типы записей есть в файле -----
+
+        # Диагностика типов записей
         type_counts = con.execute(f"SELECT type, COUNT(*) as cnt FROM read_parquet('{data_file}') GROUP BY type").df()
         print("📋 Типы записей в файле:")
         print(type_counts.to_string(index=False))
-        
-        # ----- Публикации: помесячная статистика -----
+
+        # ----- Публикации: помесячная статистика (с приведением типа) -----
         query_papers = f"""
             SELECT 
-                strftime(publication_date, '%Y-%m') as month,
+                strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
                 COUNT(*) as count
             FROM read_parquet('{data_file}')
             WHERE publication_date IS NOT NULL AND type = 'publication'
@@ -116,17 +105,15 @@ def load_domain_data(domain_clean):
         papers_counts = df_papers['count'].tolist()
         print(f"📊 Публикации: найдено {len(dates_papers)} месяцев, всего {sum(papers_counts)} записей")
 
-        # Общее число публикаций
         papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{data_file}') WHERE type = 'publication'").fetchone()[0]
 
-        # Среднее цитирование (только для публикаций)
         cited_avg = con.execute(f"SELECT AVG(citations) FROM read_parquet('{data_file}') WHERE type = 'publication' AND citations IS NOT NULL").fetchone()[0]
         cited_avg = round(cited_avg, 2) if cited_avg else 0
 
-        # ----- Патенты: помесячная статистика -----
+        # ----- Патенты: помесячная статистика (с приведением типа) -----
         query_patents = f"""
             SELECT 
-                strftime(publication_date, '%Y-%m') as month,
+                strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
                 COUNT(*) as count
             FROM read_parquet('{data_file}')
             WHERE publication_date IS NOT NULL AND type = 'patent'
@@ -138,10 +125,9 @@ def load_domain_data(domain_clean):
         patents_counts = df_patents['count'].tolist()
         print(f"📊 Патенты: найдено {len(dates_patents)} месяцев, всего {sum(patents_counts)} записей")
 
-        # Общее число патентов
         patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{data_file}') WHERE type = 'patent'").fetchone()[0]
 
-        # ----- Объединение временных рядов -----
+        # Объединение
         all_months = sorted(set(dates_papers) | set(dates_patents))
         if not all_months:
             print("⚠️ Нет данных ни по одному из источников (all_months пуст)")
@@ -155,8 +141,7 @@ def load_domain_data(domain_clean):
 
         print(f"📅 Всего месяцев в объединённом ряду: {len(all_months)}")
 
-        # ----- Расчёт дополнительных метрик (заглушки, можно заменить) -----
-        # (оставляем заглушки, чтобы не усложнять)
+        # Заглушки для дополнительных метрик (можно будет заменить позже)
         papers_growth = round(np.random.uniform(5, 15), 1)
         patents_growth = round(np.random.uniform(8, 20), 1)
         time_lag = round(np.random.uniform(2.5, 4.5), 1)
