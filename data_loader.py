@@ -63,6 +63,7 @@ def load_domain_data(domain_clean):
     cpc_condition = _cpc_filter(domain_clean)
 
     # 1. Месячная агрегация патентов (семейства)
+    # Преобразуем priority_date (BIGINT) в timestamp (предполагаем секунды с эпохи)
     query_monthly = f"""
         WITH domain_pubs AS (
             SELECT DISTINCT c.publication_number
@@ -70,7 +71,7 @@ def load_domain_data(domain_clean):
             WHERE {cpc_condition}
         )
         SELECT 
-            DATE_TRUNC('month', p.priority_date)::DATE AS month,
+            DATE_TRUNC('month', to_timestamp(p.priority_date))::DATE AS month,
             COUNT(DISTINCT p.family_id) AS patent_count
         FROM patents p
         JOIN domain_pubs dp ON p.publication_number = dp.publication_number
