@@ -114,17 +114,17 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(date_text)
     story.append(Spacer(1, 20))
 
-    # Ключевые метрики
+    # Ключевые метрики (используем .get() для безопасности)
     story.append(Paragraph("📊 Ключевые метрики", styles['Heading2']))
     story.append(Spacer(1, 10))
 
     metrics_data = [
         ['Показатель', 'Значение', 'Изменение'],
-        ['Научные публикации', str(metrics['papers_total']), f"+{metrics['papers_growth']}%"],
-        ['Патенты', str(metrics['patents_total']), f"+{metrics['patents_growth']}%"],
-        ['Time Lag', f"{metrics['time_lag']} года", str(metrics['time_lag_change'])],
-        ['Trend Score', f"{metrics['trend_score']}/100", metrics['trend_status']],
-        ['AI-интеграция', f"{metrics['ai_share']}%", "в патентах"]
+        ['Научные публикации', str(metrics.get('papers_total', 0)), f"+{metrics.get('papers_growth', 0)}%"],
+        ['Патенты', str(metrics.get('patents_total', 0)), f"+{metrics.get('patents_growth', 0)}%"],
+        ['Time Lag', f"{metrics.get('time_lag', 0)} года", str(metrics.get('time_lag_change', '0'))],
+        ['Trend Score', f"{metrics.get('trend_score', 0)}/100", metrics.get('trend_status', 'Нет данных')],
+        ['AI-интеграция', f"{metrics.get('ai_share', 0)}%", "в патентах"]
     ]
 
     metrics_table = Table(metrics_data, colWidths=[150, 100, 100])
@@ -147,9 +147,11 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("🏭 Топ-5 заявителей", styles['Heading2']))
     story.append(Spacer(1, 10))
 
+    top_assignees = metrics.get('top_assignees', ['Нет данных'])
+    assignee_values = metrics.get('assignee_values', [0])
     assignees_data = [['Компания', 'Количество патентов']]
-    for i in range(len(metrics['top_assignees'])):
-        assignees_data.append([metrics['top_assignees'][i], str(metrics['assignee_values'][i])])
+    for i in range(len(top_assignees)):
+        assignees_data.append([top_assignees[i], str(assignee_values[i])])
 
     assignees_table = Table(assignees_data, colWidths=[200, 100])
     assignees_table.setStyle(TableStyle([
@@ -167,9 +169,11 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("🌍 География патентования", styles['Heading2']))
     story.append(Spacer(1, 10))
 
+    countries = metrics.get('countries', ['Нет данных'])
+    country_values = metrics.get('country_values', [100])
     geo_data = [['Страна', 'Доля (%)']]
-    for i in range(len(metrics['countries'])):
-        geo_data.append([metrics['countries'][i], str(metrics['country_values'][i])])
+    for i in range(len(countries)):
+        geo_data.append([countries[i], str(country_values[i])])
 
     geo_table = Table(geo_data, colWidths=[150, 100])
     geo_table.setStyle(TableStyle([
@@ -187,23 +191,25 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("📈 Динамика развития (последние 2 года)", styles['Heading2']))
     story.append(Spacer(1, 10))
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(dates[-24:], papers[-24:], label='Публикации', color='#00CC96', linewidth=2)
-    ax.plot(dates[-24:], patents[-24:], label='Патенты', color='#FF4B4B', linewidth=2)
-    ax.set_xlabel('Год')
-    ax.set_ylabel('Количество')
-    ax.set_title(f'{domain_name}: Динамика за 2 года')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_facecolor('#f8f9fa')
-    fig.patch.set_facecolor('#f8f9fa')
+    if len(dates) > 0:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(dates[-24:], papers[-24:], label='Публикации', color='#00CC96', linewidth=2)
+        ax.plot(dates[-24:], patents[-24:], label='Патенты', color='#FF4B4B', linewidth=2)
+        ax.set_xlabel('Год')
+        ax.set_ylabel('Количество')
+        ax.set_title(f'{domain_name}: Динамика за 2 года')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor('#f8f9fa')
+        fig.patch.set_facecolor('#f8f9fa')
 
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
-    plt.close(fig)
-    img_buffer.seek(0)
-
-    story.append(Image(img_buffer, width=450, height=250))
+        img_buffer = io.BytesIO()
+        fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
+        plt.close(fig)
+        img_buffer.seek(0)
+        story.append(Image(img_buffer, width=450, height=250))
+    else:
+        story.append(Paragraph("Нет данных для графика", styles['Normal']))
     story.append(Spacer(1, 20))
 
     # Подтехнологии
@@ -237,14 +243,15 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("💡 Рекомендации", styles['Heading2']))
     story.append(Spacer(1, 10))
 
-    if metrics['trend_score'] > 80:
+    trend_score = metrics.get('trend_score', 0)
+    if trend_score > 80:
         recs = [
             "🔥 Технология показывает взрывной рост. Рекомендуется:",
             "• Активно инвестировать в R&D",
             "• Усилить патентную защиту",
             "• Мониторить стартапы в этой области"
         ]
-    elif metrics['trend_score'] > 60:
+    elif trend_score > 60:
         recs = [
             "📈 Стабильный рост. Рекомендуется:",
             "• Продолжать текущие разработки",
@@ -332,8 +339,10 @@ with st.sidebar:
         st.markdown("🟡 BigQuery")
     with status_col2:
         if data_available:
-            st.markdown(f"✅ {metrics['papers_total']} статей")
-            st.markdown(f"⏳ {metrics['patents_total']} патентов")
+            papers_total = metrics.get('papers_total', 0)
+            patents_total = metrics.get('patents_total', 0)
+            st.markdown(f"✅ {papers_total} статей")
+            st.markdown(f"⏳ {patents_total} патентов")
         else:
             st.markdown("❌ Нет данных")
             st.markdown("❌ Нет данных")
@@ -347,35 +356,43 @@ with st.sidebar:
 # ========== МЕТРИКИ ==========
 col1, col2, col3, col4 = st.columns(4)
 with col1:
+    papers_total = metrics.get('papers_total', 0)
+    papers_growth = metrics.get('papers_growth', 0)
     st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: white; margin:0">📄 Публикации</h3>
-        <h1 style="color: white; margin:0">{metrics['papers_total']}</h1>
-        <p style="color: white; margin:0">+{metrics['papers_growth']}% за год</p>
+        <h1 style="color: white; margin:0">{papers_total}</h1>
+        <p style="color: white; margin:0">+{papers_growth}% за год</p>
     </div>
     """, unsafe_allow_html=True)
 with col2:
+    patents_total = metrics.get('patents_total', 0)
+    patents_growth = metrics.get('patents_growth', 0)
     st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: white; margin:0">📃 Патенты</h3>
-        <h1 style="color: white; margin:0">{metrics['patents_total']}</h1>
-        <p style="color: white; margin:0">+{metrics['patents_growth']}% за год</p>
+        <h1 style="color: white; margin:0">{patents_total}</h1>
+        <p style="color: white; margin:0">+{patents_growth}% за год</p>
     </div>
     """, unsafe_allow_html=True)
 with col3:
+    time_lag = metrics.get('time_lag', 0)
+    time_lag_change = metrics.get('time_lag_change', '0')
     st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: white; margin:0">⏱ Time Lag</h3>
-        <h1 style="color: white; margin:0">{metrics['time_lag']} года</h1>
-        <p style="color: white; margin:0">{metrics['time_lag_change']} vs 2024</p>
+        <h1 style="color: white; margin:0">{time_lag} года</h1>
+        <p style="color: white; margin:0">{time_lag_change} vs 2024</p>
     </div>
     """, unsafe_allow_html=True)
 with col4:
+    trend_score = metrics.get('trend_score', 0)
+    trend_status = metrics.get('trend_status', 'Нет данных')
     st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: white; margin:0">🎯 Trend Score</h3>
-        <h1 style="color: white; margin:0">{metrics['trend_score']}/100</h1>
-        <p style="color: white; margin:0">{metrics['trend_status']}</p>
+        <h1 style="color: white; margin:0">{trend_score}/100</h1>
+        <p style="color: white; margin:0">{trend_status}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -428,9 +445,11 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 🏭 Топ заявителей")
+        top_assignees = metrics.get('top_assignees', ['Нет данных'])
+        assignee_values = metrics.get('assignee_values', [0])
         top_df = pd.DataFrame({
-            'Компания': metrics['top_assignees'],
-            'Патенты': metrics['assignee_values']
+            'Компания': top_assignees,
+            'Патенты': assignee_values
         })
         fig2 = px.bar(
             top_df, x='Компания', y='Патенты',
@@ -446,9 +465,11 @@ with tab1:
 
     with col2:
         st.markdown("### 🌍 География")
+        countries = metrics.get('countries', ['Нет данных'])
+        country_values = metrics.get('country_values', [100])
         geo_df = pd.DataFrame({
-            'Страна': metrics['countries'],
-            'Доля': metrics['country_values']
+            'Страна': countries,
+            'Доля': country_values
         })
         fig3 = px.pie(
             geo_df, values='Доля', names='Страна',
@@ -496,7 +517,7 @@ with tab2:
                 st.markdown(f"**Патентов:** {np.random.randint(50, 300)}")
                 st.markdown(f"**Time Lag:** {np.random.uniform(2, 5):.1f} года")
             with col2:
-                st.markdown(f"**Топ-заявитель:** {np.random.choice(metrics['top_assignees'])}")
+                st.markdown(f"**Топ-заявитель:** {np.random.choice(metrics.get('top_assignees', ['Нет данных']))}")
                 st.markdown(f"**AI-интеграция:** {np.random.randint(10, 60)}%")
                 st.markdown(f"**Trend Score:** {np.random.randint(65, 95)}/100")
 
@@ -565,7 +586,8 @@ with tab3:
                     if st.button("📊 Экспорт в Excel", disabled=True, use_container_width=True):
                         st.info("Функция в разработке")
                 with col3:
-                    st.info(f"📈 AI-интеграция в домене: {metrics['ai_share']}% патентов содержат G06N*")
+                    ai_share = metrics.get('ai_share', 0)
+                    st.info(f"📈 AI-интеграция в домене: {ai_share}% патентов содержат G06N*")
             else:
                 st.warning("⚠️ Не найдены колонки для отображения")
         else:
@@ -688,10 +710,13 @@ with tab4:
     with col2:
         timeline_data = pd.DataFrame({
             'Дата': dates,
-            'Публикации': papers.astype(int),
-            'Патенты': patents.astype(int)
+            'Публикации': papers.astype(int) if len(papers) > 0 else [],
+            'Патенты': patents.astype(int) if len(patents) > 0 else []
         })
-        csv = timeline_data.to_csv(index=False).encode('utf-8')
+        if len(timeline_data) > 0:
+            csv = timeline_data.to_csv(index=False).encode('utf-8')
+        else:
+            csv = "".encode('utf-8')
         st.download_button(
             "📥 Скачать CSV",
             csv,
