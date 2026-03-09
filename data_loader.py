@@ -10,10 +10,10 @@ DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Словарь с именами файлов и их Google Drive ID
+# Используем те же имена, что создаёт create_data.py (без "_full")
 FILES = {
-    "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
-    "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
-    "patents.parquet": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L"
+    "semiconductors_clean.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
+    "gene_engineering_clean.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl"
 }
 
 def download_all_files():
@@ -37,27 +37,21 @@ def load_domain_data(domain_clean):
         dates: np.array месяцев в формате 'YYYY-MM'
         papers: np.array количества публикаций по месяцам
         patents: np.array количества патентов по месяцам
-        metrics: dict с общими метриками (все ключи, используемые в app.py)
+        metrics: dict с общими метриками
     """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
 
-    # Определяем файл публикаций в зависимости от домена
+    # Определяем файл для данного домена (в нём есть и публикации, и патенты)
     if domain_clean == "Полупроводники":
-        papers_file = DATA_DIR / "semiconductors_clean_full.parquet"
+        data_file = DATA_DIR / "semiconductors_clean.parquet"
     elif domain_clean == "Генная инженерия":
-        papers_file = DATA_DIR / "gene_engineering_clean_full.parquet"
+        data_file = DATA_DIR / "gene_engineering_clean.parquet"
     else:
         return np.array([]), np.array([]), np.array([]), {}
 
-    patents_file = DATA_DIR / "patents.parquet"
-
-    # Проверяем наличие файлов
-    if not papers_file.exists():
-        st.error(f"❌ Файл публикаций не найден: {papers_file}")
+    if not data_file.exists():
+        st.error(f"❌ Файл данных не найден: {data_file}")
         return np.array([]), np.array([]), np.array([]), {}
-    if not patents_file.exists():
-        st.warning("⚠️ Файл патентов отсутствует, статистика по патентам будет нулевой.")
-        # Продолжаем без патентов
 
     con = duckdb.connect()
 
@@ -66,8 +60,8 @@ def load_domain_data(domain_clean):
         SELECT 
             strftime(publication_date, '%Y-%m') as month,
             COUNT(*) as count
-        FROM read_parquet('{papers_file}')
-        WHERE publication_date IS NOT NULL
+        FROM read_parquet('{data_file}')
+        WHERE publication_date IS NOT NULL AND type = 'publication'
         GROUP BY month
         ORDER BY month
     """
@@ -82,45 +76,46 @@ def load_domain_data(domain_clean):
 
     # Общее число публикаций
     try:
-        papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{papers_file}')").fetchone()[0]
+        papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{data_file}') WHERE type = 'publication'").fetchone()[0]
     except:
         papers_total = 0
 
-    # Среднее цитирование
+    # Среднее цитирование (только для публикаций)
     try:
-        cited_avg = con.execute(f"SELECT AVG(cited_by_count) FROM read_parquet('{papers_file}') WHERE cited_by_count IS NOT NULL").fetchone()[0]
+        cited_avg = con.execute(f"SELECT AVG(citations) FROM read_parquet('{data_file}') WHERE type = 'publication' AND citations IS NOT NULL").fetchone()[0]
         cited_avg = round(cited_avg, 2) if cited_avg else 0
     except:
         cited_avg = 0
 
     # ----- Патенты: помесячная статистика -----
-    dates_patents, patents_counts = [], []
-    patents_total = 0
+    query_patents = f"""
+        SELECT 
+            strftime(publication_date, '%Y-%m') as month,
+            COUNT(*) as count
+        FROM read_parquet('{data_file}')
+        WHERE publication_date IS NOT NULL AND type = 'patent'
+        GROUP BY month
+        ORDER BY month
+    """
+    try:
+        df_patents = con.execute(query_patents).df()
+        dates_patents = df_patents['month'].tolist()
+        patents_counts = df_patents['count'].tolist()
+        print(f"📊 Найдено {len(dates_patents)} месяцев с патентами")
+    except Exception as e:
+        print(f"Ошибка при обработке патентов: {e}")
+        dates_patents, patents_counts = [], []
 
-    if patents_file.exists():
-        query_patents = f"""
-            SELECT 
-                strftime(publication_date, '%Y-%m') as month,
-                COUNT(*) as count
-            FROM read_parquet('{patents_file}')
-            WHERE publication_date IS NOT NULL
-            GROUP BY month
-            ORDER BY month
-        """
-        try:
-            df_patents = con.execute(query_patents).df()
-            dates_patents = df_patents['month'].tolist()
-            patents_counts = df_patents['count'].tolist()
-            patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{patents_file}')").fetchone()[0]
-            print(f"📊 Найдено {len(dates_patents)} месяцев с патентами")
-        except Exception as e:
-            print(f"Ошибка при обработке патентов: {e}")
+    # Общее число патентов
+    try:
+        patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{data_file}') WHERE type = 'patent'").fetchone()[0]
+    except:
+        patents_total = 0
 
     # ----- Объединение временных рядов -----
     all_months = sorted(set(dates_papers) | set(dates_patents))
     if not all_months:
         print("⚠️ Нет данных ни по одному из источников, возвращаем заглушки.")
-        # Возвращаем пустые массивы, но метрики заполняем нулями (чтобы не было KeyError)
         empty_metrics = {
             'papers_total': 0,
             'patents_total': 0,
@@ -146,7 +141,6 @@ def load_domain_data(domain_clean):
     patents_aligned = [patents_dict.get(month, 0) for month in all_months]
 
     # ----- Расчёт дополнительных метрик (заглушки, пока нет реальных данных) -----
-    # В будущем здесь будет реальная логика
     if papers_total > 0 or patents_total > 0:
         papers_growth = round(np.random.uniform(5, 15), 1)      # пример
         patents_growth = round(np.random.uniform(8, 20), 1)     # пример
@@ -163,9 +157,8 @@ def load_domain_data(domain_clean):
         top_assignees = ['Компания А', 'Компания Б', 'Компания В', 'Компания Г', 'Компания Д']
         assignee_values = [np.random.randint(50, 200) for _ in range(5)]
         countries = ['США', 'Китай', 'Япония', 'Южная Корея', 'Германия']
-        country_values = [45, 30, 15, 7, 3]  # проценты
+        country_values = [45, 30, 15, 7, 3]
     else:
-        # Если данных нет, заполняем нулями / заглушками
         papers_growth = patents_growth = 0
         time_lag = 0
         time_lag_change = '0'
@@ -177,7 +170,6 @@ def load_domain_data(domain_clean):
         countries = ['Нет данных']
         country_values = [100]
 
-    # ----- Метрики (все ключи, используемые в app.py) -----
     metrics = {
         'papers_total': papers_total,
         'patents_total': patents_total,
