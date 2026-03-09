@@ -7,7 +7,7 @@ import numpy as np
 import io
 import matplotlib.pyplot as plt
 import os
-
+print("🚀 app.py начал выполняться")
 # Импортируем наш загрузчик данных
 from data_loader import load_domain_data
 
