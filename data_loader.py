@@ -157,22 +157,37 @@ def load_domain_data(domain_clean):
                 CREATE OR REPLACE TEMP VIEW assignee_harmonized AS SELECT * FROM read_parquet('{assignee_file}');
             """)
 
-            # --- Исправлено: используем publication_date вместо patent_date ---
-            query_patents_monthly = """
-                SELECT 
-                    strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
-                    COUNT(*) as count
-                FROM patents
-                WHERE publication_date IS NOT NULL
-                GROUP BY month
-                ORDER BY month
-            """
+            # --- ИСПРАВЛЕНО: определяем тип publication_date и преобразуем ---
+            date_sample = con.execute("SELECT publication_date FROM patents LIMIT 1").fetchone()
+            if date_sample and isinstance(date_sample[0], (int, np.integer)):
+                # Unix timestamp в миллисекундах
+                query_patents_monthly = """
+                    SELECT 
+                        strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
+                        COUNT(*) as count
+                    FROM patents
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
+            else:
+                # Дата в другом формате
+                query_patents_monthly = """
+                    SELECT 
+                        strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
+                        COUNT(*) as count
+                    FROM patents
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
+
             df_patents_monthly = con.execute(query_patents_monthly).df()
             patents_aligned_dict = dict(zip(df_patents_monthly['month'], df_patents_monthly['count']))
 
             patents_total = con.execute("SELECT COUNT(*) FROM patents").fetchone()[0]
 
-            # Топ-5 заявителей (проверим наличие колонки assignee_harmonized_id)
+            # Топ-5 заявителей
             try:
                 top_assignees_df = con.execute("""
                     SELECT 
@@ -191,7 +206,7 @@ def load_domain_data(domain_clean):
             except Exception as e:
                 print(f"⚠️ Не удалось получить топ заявителей: {e}")
 
-            # География (упрощённо)
+            # География (по publication_number)
             try:
                 countries_df = con.execute("""
                     SELECT 
@@ -233,9 +248,7 @@ def load_domain_data(domain_clean):
         except Exception as e:
             print(f"❌ Критическая ошибка при обработке патентов: {e}")
             traceback.print_exc()
-            # Оставляем patents_available = True, но данные уже не полные? Лучше сбросить флаг,
-            # чтобы дальше не использовать patents_aligned_dict
-            patents_available = False
+            patents_available = False  # сбрасываем флаг, но переменные уже инициализированы
 
     # --- Объединение временных рядов ---
     all_months = sorted(set(all_months) | set(patents_aligned_dict.keys() if patents_available else []))
@@ -246,12 +259,120 @@ def load_domain_data(domain_clean):
     papers_aligned_final = [papers_dict.get(month, 0) for month in all_months]
     patents_aligned_final = [patents_aligned_dict.get(month, 0) for month in all_months]
 
-    # --- Расчёт метрик ---
-    # ... (остальной код без изменений, он уже был) ...
+    # --- Расчёт метрик роста (с защитой от ошибок) ---
+    try:
+        if len(papers_aligned_final) >= 24:
+            recent_papers = sum(papers_aligned_final[-12:])
+            prev_papers = sum(papers_aligned_final[-24:-12])
+            papers_growth = round(((recent_papers - prev_papers) / prev_papers) * 100, 1) if prev_papers > 0 else 0
+        else:
+            papers_growth = 0
 
-    # Сократим оставшуюся часть для краткости (она идентична предыдущей версии, кроме использования правильных имён переменных)
-    # Вставьте сюда весь блок расчёта метрик из предыдущего кода (начиная с расчёта papers_growth и до конца)
-    # ... 
+        if len(patents_aligned_final) >= 24:
+            recent_patents = sum(patents_aligned_final[-12:])
+            prev_patents = sum(patents_aligned_final[-24:-12])
+            patents_growth = round(((recent_patents - prev_patents) / prev_patents) * 100, 1) if prev_patents > 0 else 0
+        else:
+            patents_growth = 0
 
-    # Для полноты я приведу остаток кода, но в ответе лучше показать полный исправленный файл.
-    # Ниже дам полный исправленный код с учётом всех изменений.
+        # --- Trend Score ---
+        if len(papers_aligned_final) >= 12 and len(patents_aligned_final) >= 12:
+            years = min(3, len(all_months)//12)
+            papers_slopes = []
+            for y in range(years):
+                y_data = papers_aligned_final[-(y+1)*12:-(y)*12] if y>0 else papers_aligned_final[-12:]
+                if len(y_data) > 1:
+                    x = np.arange(len(y_data))
+                    slope = np.polyfit(x, y_data, 1)[0]
+                    papers_slopes.append(max(0, slope))
+            avg_papers_slope = np.mean(papers_slopes) if papers_slopes else 0
+
+            patents_slopes = []
+            for y in range(years):
+                y_data = patents_aligned_final[-(y+1)*12:-(y)*12] if y>0 else patents_aligned_final[-12:]
+                if len(y_data) > 1:
+                    x = np.arange(len(y_data))
+                    slope = np.polyfit(x, y_data, 1)[0]
+                    patents_slopes.append(max(0, slope))
+            avg_patents_slope = np.mean(patents_slopes) if patents_slopes else 0
+
+            max_slope = max(avg_papers_slope, avg_patents_slope, 1)
+            trend_score = int(min(100, (avg_papers_slope + avg_patents_slope) / max_slope * 50 + 50))
+        else:
+            trend_score = 50
+
+        if trend_score >= 80:
+            trend_status = "Взрывной рост"
+        elif trend_score >= 60:
+            trend_status = "Стабильный рост"
+        else:
+            trend_status = "Созревание"
+
+        # --- Time Lag ---
+        try:
+            if len(papers_aligned_final) > 0 and len(patents_aligned_final) > 0:
+                years_list = [int(m[:4]) for m in all_months]
+                weighted_year_papers = np.average(years_list, weights=papers_aligned_final)
+                weighted_year_patents = np.average(years_list, weights=patents_aligned_final)
+                time_lag = round(abs(weighted_year_patents - weighted_year_papers), 1)
+            else:
+                time_lag = 3.0
+        except:
+            time_lag = 3.0
+
+        # Изменение time lag
+        try:
+            if len(all_months) >= 48:
+                recent_mask = [m >= all_months[-24] for m in all_months]
+                prev_mask = [m < all_months[-24] and m >= all_months[-48] for m in all_months]
+                if any(recent_mask) and any(prev_mask):
+                    recent_papers_weights = [p for p, m in zip(papers_aligned_final, recent_mask) if m]
+                    recent_patents_weights = [p for p, m in zip(patents_aligned_final, recent_mask) if m]
+                    recent_years = [int(m[:4]) for m, m_flag in zip(all_months, recent_mask) if m_flag]
+
+                    prev_papers_weights = [p for p, m in zip(papers_aligned_final, prev_mask) if m]
+                    prev_patents_weights = [p for p, m in zip(patents_aligned_final, prev_mask) if m]
+                    prev_years = [int(m[:4]) for m, m_flag in zip(all_months, prev_mask) if m_flag]
+
+                    if recent_years and prev_years:
+                        recent_lag = abs(np.average(recent_years, weights=recent_patents_weights) - np.average(recent_years, weights=recent_papers_weights))
+                        prev_lag = abs(np.average(prev_years, weights=prev_patents_weights) - np.average(prev_years, weights=prev_papers_weights))
+                        lag_change = round(recent_lag - prev_lag, 1)
+                        time_lag_change = f"+{lag_change}" if lag_change > 0 else str(lag_change)
+                    else:
+                        time_lag_change = "0"
+                else:
+                    time_lag_change = "0"
+            else:
+                time_lag_change = "0"
+        except:
+            time_lag_change = "0"
+    except Exception as e:
+        print(f"⚠️ Ошибка при расчёте метрик, использую значения по умолчанию: {e}")
+        papers_growth = 0
+        patents_growth = 0
+        trend_score = 50
+        trend_status = "Стабильный рост"
+        time_lag = 3.0
+        time_lag_change = "0"
+
+    # Сбор метрик
+    metrics = {
+        'papers_total': papers_total,
+        'patents_total': patents_total,
+        'papers_cited_avg': papers_cited_avg,
+        'papers_growth': papers_growth,
+        'patents_growth': patents_growth,
+        'time_lag': time_lag,
+        'time_lag_change': time_lag_change,
+        'trend_score': trend_score,
+        'trend_status': trend_status,
+        'ai_share': ai_share,
+        'top_assignees': top_assignees,
+        'assignee_values': assignee_values,
+        'countries': countries,
+        'country_values': country_values
+    }
+
+    print("✅ Данные успешно загружены и обработаны")
+    return np.array(all_months), np.array(papers_aligned_final), np.array(patents_aligned_final), metrics
