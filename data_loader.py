@@ -37,7 +37,7 @@ def load_domain_data(domain_clean):
         dates: np.array месяцев в формате 'YYYY-MM'
         papers: np.array количества публикаций по месяцам
         patents: np.array количества патентов по месяцам
-        metrics: dict с общими метриками
+        metrics: dict с общими метриками (все ключи, используемые в app.py)
     """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
 
@@ -62,7 +62,6 @@ def load_domain_data(domain_clean):
     con = duckdb.connect()
 
     # ----- Публикации: помесячная статистика -----
-    # Предполагаем, что в данных есть колонка publication_date
     query_papers = f"""
         SELECT 
             strftime(publication_date, '%Y-%m') as month,
@@ -86,7 +85,7 @@ def load_domain_data(domain_clean):
     except:
         papers_total = 0
 
-    # Среднее цитирование (если есть колонка cited_by_count)
+    # Среднее цитирование
     try:
         cited_avg = con.execute(f"SELECT AVG(cited_by_count) FROM read_parquet('{papers_file}') WHERE cited_by_count IS NOT NULL").fetchone()[0]
         cited_avg = round(cited_avg, 2) if cited_avg else 0
@@ -119,7 +118,24 @@ def load_domain_data(domain_clean):
     all_months = sorted(set(dates_papers) | set(dates_patents))
     if not all_months:
         # Нет данных ни по одному из источников
-        return np.array([]), np.array([]), np.array([]), {}
+        # Возвращаем пустые массивы, но метрики заполняем нулями (чтобы не было KeyError)
+        empty_metrics = {
+            'papers_total': 0,
+            'patents_total': 0,
+            'papers_cited_avg': 0,
+            'papers_growth': 0,
+            'patents_growth': 0,
+            'time_lag': 0,
+            'time_lag_change': '0',
+            'trend_score': 0,
+            'trend_status': 'Нет данных',
+            'ai_share': 0,
+            'top_assignees': ['Нет данных'],
+            'assignee_values': [0],
+            'countries': ['Нет данных'],
+            'country_values': [0]
+        }
+        return np.array([]), np.array([]), np.array([]), empty_metrics
 
     papers_dict = dict(zip(dates_papers, papers_counts))
     patents_dict = dict(zip(dates_patents, patents_counts))
@@ -127,11 +143,54 @@ def load_domain_data(domain_clean):
     papers_aligned = [papers_dict.get(month, 0) for month in all_months]
     patents_aligned = [patents_dict.get(month, 0) for month in all_months]
 
-    # ----- Метрики -----
+    # ----- Расчёт дополнительных метрик (заглушки, пока нет реальных данных) -----
+    # В будущем здесь будет реальная логика
+    if papers_total > 0 and patents_total > 0:
+        papers_growth = round(np.random.uniform(5, 15), 1)      # пример
+        patents_growth = round(np.random.uniform(8, 20), 1)     # пример
+        time_lag = round(np.random.uniform(2.5, 4.5), 1)        # пример
+        time_lag_change = f"+{round(np.random.uniform(0.1, 0.5), 1)}" if np.random.rand() > 0.5 else f"-{round(np.random.uniform(0.1, 0.5), 1)}"
+        trend_score = np.random.randint(60, 95)
+        if trend_score >= 80:
+            trend_status = "Взрывной рост"
+        elif trend_score >= 60:
+            trend_status = "Стабильный рост"
+        else:
+            trend_status = "Созревание"
+        ai_share = np.random.randint(15, 45)
+        top_assignees = ['Компания А', 'Компания Б', 'Компания В', 'Компания Г', 'Компания Д']
+        assignee_values = [np.random.randint(50, 200) for _ in range(5)]
+        countries = ['США', 'Китай', 'Япония', 'Южная Корея', 'Германия']
+        country_values = [45, 30, 15, 7, 3]  # проценты
+    else:
+        # Если данных нет, заполняем нулями / заглушками
+        papers_growth = patents_growth = 0
+        time_lag = 0
+        time_lag_change = '0'
+        trend_score = 0
+        trend_status = 'Нет данных'
+        ai_share = 0
+        top_assignees = ['Нет данных']
+        assignee_values = [0]
+        countries = ['Нет данных']
+        country_values = [100]
+
+    # ----- Метрики (все ключи, используемые в app.py) -----
     metrics = {
         'papers_total': papers_total,
         'patents_total': patents_total,
-        'papers_cited_avg': cited_avg
+        'papers_cited_avg': cited_avg,
+        'papers_growth': papers_growth,
+        'patents_growth': patents_growth,
+        'time_lag': time_lag,
+        'time_lag_change': time_lag_change,
+        'trend_score': trend_score,
+        'trend_status': trend_status,
+        'ai_share': ai_share,
+        'top_assignees': top_assignees,
+        'assignee_values': assignee_values,
+        'countries': countries,
+        'country_values': country_values
     }
 
     print(f"✅ Метрики: {metrics}")
