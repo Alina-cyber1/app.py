@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -159,11 +160,11 @@ def load_domain_data(domain_clean):
                 val = sample.iloc[0, 0]
                 # Определяем тип и строим соответствующий запрос
                 if isinstance(val, (int, np.integer)):
-                    # Предполагаем, что это Unix timestamp в секундах
-                    print("ℹ️ publication_date в патентах - целое число, интерпретируем как Unix timestamp (секунды)")
+                    # Предполагаем, что это Unix timestamp в миллисекундах -> делим на 1000
+                    print("ℹ️ publication_date в патентах - целое число, интерпретируем как миллисекунды (делим на 1000)")
                     query_patents = f"""
                         SELECT 
-                            strftime(CAST(to_timestamp(publication_date) AS DATE), '%Y-%m') as month,
+                            strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
                             COUNT(*) as count
                         FROM read_parquet('{patents_file}')
                         WHERE publication_date IS NOT NULL
