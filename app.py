@@ -187,32 +187,26 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("📈 Динамика развития (последние 2 года)", styles['Heading2']))
     story.append(Spacer(1, 10))
 
-    # Проверим, что dates не пуст и достаточно данных
-    if len(dates) > 0:
-        # Если данных меньше 24, берём все
-        n_last = min(24, len(dates))
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(dates[-n_last:], papers[-n_last:], label='Публикации', color='#00CC96', linewidth=2)
-        ax.plot(dates[-n_last:], patents[-n_last:], label='Патенты', color='#FF4B4B', linewidth=2)
-        ax.set_xlabel('Год')
-        ax.set_ylabel('Количество')
-        ax.set_title(f'{domain_name}: Динамика за последние {n_last} месяцев')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('#f8f9fa')
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(dates[-24:], papers[-24:], label='Публикации', color='#00CC96', linewidth=2)
+    ax.plot(dates[-24:], patents[-24:], label='Патенты', color='#FF4B4B', linewidth=2)
+    ax.set_xlabel('Год')
+    ax.set_ylabel('Количество')
+    ax.set_title(f'{domain_name}: Динамика за 2 года')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_facecolor('#f8f9fa')
+    fig.patch.set_facecolor('#f8f9fa')
 
-        img_buffer = io.BytesIO()
-        fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
-        plt.close(fig)
-        img_buffer.seek(0)
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
+    plt.close(fig)
+    img_buffer.seek(0)
 
-        story.append(Image(img_buffer, width=450, height=250))
-    else:
-        story.append(Paragraph("Нет данных для построения графика", styles['Normal']))
+    story.append(Image(img_buffer, width=450, height=250))
     story.append(Spacer(1, 20))
 
-    # Подтехнологии (заглушки)
+    # Подтехнологии
     story.append(Paragraph("🔬 Быстрорастущие подтехнологии", styles['Heading2']))
     story.append(Spacer(1, 10))
 
@@ -329,7 +323,7 @@ with st.sidebar:
     # Загружаем данные
     dates, papers, patents, metrics = load_domain_data(domain_clean)
 
-    # Проверяем, есть ли данные
+    # Проверяем, есть ли данные (dates не пуст)
     data_available = len(dates) > 0
 
     status_col1, status_col2 = st.columns(2)
@@ -345,10 +339,10 @@ with st.sidebar:
             st.markdown("❌ Нет данных")
     st.progress(0.8 if data_available else 0.2, text="Готовность MVP")
 
-# Если данных нет, показываем предупреждение и останавливаем выполнение
-if not data_available:
-    st.warning(f"⚠️ Для домена «{domain_clean}» пока нет данных. Пожалуйста, выберите другой домен или добавьте данные.")
-    st.stop()
+    # Если данных нет – показываем предупреждение и останавливаем выполнение
+    if not data_available:
+        st.warning(f"⚠️ Для домена «{domain_clean}» пока нет данных. Пожалуйста, выберите другой домен или добавьте данные.")
+        st.stop()
 
 # ========== МЕТРИКИ ==========
 col1, col2, col3, col4 = st.columns(4)
@@ -512,17 +506,13 @@ with tab3:
     # Загружаем DataFrame для показа примеров
     domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
-    # Используем файл _clean_full.parquet
-    file_path = os.path.join('data', 'processed', f"{domain_key}_clean_full.parquet")
+    file_path = os.path.join('data', 'processed', f"{domain_key}_clean.parquet")
     
     try:
-        # Проверяем существование файла
         if os.path.exists(file_path):
-            # Загружаем реальные данные
             df_real = pd.read_parquet(file_path, engine='fastparquet')
             st.success(f"✅ Загружено {len(df_real):,} записей из РЕАЛЬНЫХ данных")
             
-            # Показываем статистику
             st.markdown("### 📊 Статистика реальных данных")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -543,15 +533,12 @@ with tab3:
                 else:
                     st.metric("Годы", "N/A")
             
-            # Показываем примеры данных
             st.markdown("### 📋 Примеры реальных записей")
             display_cols = ['publication_date', 'title', 'authors', 'topic', 'citations', 'affiliation']
             available_cols = [col for col in display_cols if col in df_real.columns]
             
             if available_cols:
                 df_display = df_real[available_cols].head(10)
-                
-                # Переименовываем колонки для красивого отображения
                 column_names = {
                     'publication_date': 'Дата',
                     'title': 'Название',
@@ -561,13 +548,10 @@ with tab3:
                     'affiliation': 'Организация'
                 }
                 df_display = df_display.rename(columns={col: column_names.get(col, col) for col in df_display.columns})
-                
                 st.dataframe(df_display, hide_index=True, use_container_width=True)
                 
-                # Кнопки для скачивания
                 st.markdown("### 📥 Экспорт данных")
                 col1, col2, col3 = st.columns([1, 1, 2])
-                
                 with col1:
                     csv = df_real.head(100).to_csv(index=False).encode('utf-8')
                     st.download_button(
@@ -577,23 +561,17 @@ with tab3:
                         "text/csv",
                         use_container_width=True
                     )
-                
                 with col2:
                     if st.button("📊 Экспорт в Excel", disabled=True, use_container_width=True):
                         st.info("Функция в разработке")
-                
                 with col3:
                     st.info(f"📈 AI-интеграция в домене: {metrics['ai_share']}% патентов содержат G06N*")
             else:
                 st.warning("⚠️ Не найдены колонки для отображения")
         else:
             st.error(f"❌ Файл с данными не найден: {file_path}")
-            
     except Exception as e:
         st.error(f"❌ Ошибка загрузки реальных данных: {str(e)}")
-        st.info("💡 Проверьте логи приложения для деталей")
-        
-        # Показываем содержимое лога для диагностики
         with st.expander("🔍 Диагностическая информация"):
             st.code(f"""
             Путь к файлу: {file_path}
@@ -605,12 +583,9 @@ with tab3:
 with tab4:
     st.markdown("## 📄 Генерация отчетов")
 
-    # Проверяем наличие библиотек для PDF
     if not PDF_AVAILABLE:
         st.error("⚠️ Для экспорта PDF необходимо установить библиотеки:")
         st.code("pip install reportlab matplotlib")
-        
-        # Показываем текущий статус
         with st.expander("🔍 Диагностика"):
             st.write("Текущие установленные пакеты:")
             import sys
@@ -621,7 +596,6 @@ with tab4:
                 st.text(result.stdout[:500] + "...")
             except:
                 st.write("Не удалось получить список пакетов")
-        
         st.info("💡 После установки библиотек перезапустите приложение")
     else:
         st.success("✅ Библиотеки для PDF установлены")
@@ -712,22 +686,19 @@ with tab4:
             else:
                 st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
     with col2:
-        if len(dates) > 0:
-            timeline_data = pd.DataFrame({
-                'Дата': dates,
-                'Публикации': papers.astype(int),
-                'Патенты': patents.astype(int)
-            })
-            csv = timeline_data.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Скачать CSV",
-                csv,
-                f"{domain_clean.lower().replace(' ', '_')}_timeline.csv",
-                "text/csv",
-                use_container_width=True
-            )
-        else:
-            st.button("📥 Скачать CSV", disabled=True, use_container_width=True)
+        timeline_data = pd.DataFrame({
+            'Дата': dates,
+            'Публикации': papers.astype(int),
+            'Патенты': patents.astype(int)
+        })
+        csv = timeline_data.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "📥 Скачать CSV",
+            csv,
+            f"{domain_clean.lower().replace(' ', '_')}_timeline.csv",
+            "text/csv",
+            use_container_width=True
+        )
     with col3:
         if st.button("📧 Отправить по email", disabled=True, use_container_width=True):
             st.info("Функция в разработке")
