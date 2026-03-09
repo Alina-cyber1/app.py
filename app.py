@@ -11,7 +11,7 @@ import os
 # Импортируем наш загрузчик данных
 from data_loader import load_domain_data
 
-# ========== НАСТРОЙКА СТРАНИЦЫ (ТОЛЬКО ОДИН РАЗ, ПЕРВЫЙ ВЫЗОВ STREAMLIT) ==========
+# ========== НАСТРОЙКА СТРАНИЦЫ ==========
 st.set_page_config(
     page_title="Tech Trends Monitor",
     page_icon="🚀",
@@ -187,26 +187,32 @@ def generate_pdf_report(domain_name, metrics, dates, papers, patents):
     story.append(Paragraph("📈 Динамика развития (последние 2 года)", styles['Heading2']))
     story.append(Spacer(1, 10))
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(dates[-24:], papers[-24:], label='Публикации', color='#00CC96', linewidth=2)
-    ax.plot(dates[-24:], patents[-24:], label='Патенты', color='#FF4B4B', linewidth=2)
-    ax.set_xlabel('Год')
-    ax.set_ylabel('Количество')
-    ax.set_title(f'{domain_name}: Динамика за 2 года')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_facecolor('#f8f9fa')
-    fig.patch.set_facecolor('#f8f9fa')
+    # Проверим, что dates не пуст и достаточно данных
+    if len(dates) > 0:
+        # Если данных меньше 24, берём все
+        n_last = min(24, len(dates))
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(dates[-n_last:], papers[-n_last:], label='Публикации', color='#00CC96', linewidth=2)
+        ax.plot(dates[-n_last:], patents[-n_last:], label='Патенты', color='#FF4B4B', linewidth=2)
+        ax.set_xlabel('Год')
+        ax.set_ylabel('Количество')
+        ax.set_title(f'{domain_name}: Динамика за последние {n_last} месяцев')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor('#f8f9fa')
+        fig.patch.set_facecolor('#f8f9fa')
 
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
-    plt.close(fig)
-    img_buffer.seek(0)
+        img_buffer = io.BytesIO()
+        fig.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='#f8f9fa')
+        plt.close(fig)
+        img_buffer.seek(0)
 
-    story.append(Image(img_buffer, width=450, height=250))
+        story.append(Image(img_buffer, width=450, height=250))
+    else:
+        story.append(Paragraph("Нет данных для построения графика", styles['Normal']))
     story.append(Spacer(1, 20))
 
-    # Подтехнологии
+    # Подтехнологии (заглушки)
     story.append(Paragraph("🔬 Быстрорастущие подтехнологии", styles['Heading2']))
     story.append(Spacer(1, 10))
 
@@ -320,17 +326,29 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 📊 Статус системы")
-    # Загружаем данные (вызов нашей функции)
+    # Загружаем данные
     dates, papers, patents, metrics = load_domain_data(domain_clean)
+
+    # Проверяем, есть ли данные
+    data_available = len(dates) > 0
 
     status_col1, status_col2 = st.columns(2)
     with status_col1:
         st.markdown("🟢 OpenAlex")
         st.markdown("🟡 BigQuery")
     with status_col2:
-        st.markdown(f"✅ {metrics['papers_total']} статей")
-        st.markdown(f"⏳ {metrics['patents_total']} патентов")
-    st.progress(0.8, text="Готовность MVP")
+        if data_available:
+            st.markdown(f"✅ {metrics['papers_total']} статей")
+            st.markdown(f"⏳ {metrics['patents_total']} патентов")
+        else:
+            st.markdown("❌ Нет данных")
+            st.markdown("❌ Нет данных")
+    st.progress(0.8 if data_available else 0.2, text="Готовность MVP")
+
+# Если данных нет, показываем предупреждение и останавливаем выполнение
+if not data_available:
+    st.warning(f"⚠️ Для домена «{domain_clean}» пока нет данных. Пожалуйста, выберите другой домен или добавьте данные.")
+    st.stop()
 
 # ========== МЕТРИКИ ==========
 col1, col2, col3, col4 = st.columns(4)
@@ -494,7 +512,8 @@ with tab3:
     # Загружаем DataFrame для показа примеров
     domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
-    file_path = os.path.join('data', 'processed', f"{domain_key}_clean.parquet")
+    # Используем файл _clean_full.parquet
+    file_path = os.path.join('data', 'processed', f"{domain_key}_clean_full.parquet")
     
     try:
         # Проверяем существование файла
@@ -693,19 +712,22 @@ with tab4:
             else:
                 st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
     with col2:
-        timeline_data = pd.DataFrame({
-            'Дата': dates,
-            'Публикации': papers.astype(int),
-            'Патенты': patents.astype(int)
-        })
-        csv = timeline_data.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "📥 Скачать CSV",
-            csv,
-            f"{domain_clean.lower().replace(' ', '_')}_timeline.csv",
-            "text/csv",
-            use_container_width=True
-        )
+        if len(dates) > 0:
+            timeline_data = pd.DataFrame({
+                'Дата': dates,
+                'Публикации': papers.astype(int),
+                'Патенты': patents.astype(int)
+            })
+            csv = timeline_data.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Скачать CSV",
+                csv,
+                f"{domain_clean.lower().replace(' ', '_')}_timeline.csv",
+                "text/csv",
+                use_container_width=True
+            )
+        else:
+            st.button("📥 Скачать CSV", disabled=True, use_container_width=True)
     with col3:
         if st.button("📧 Отправить по email", disabled=True, use_container_width=True):
             st.info("Функция в разработке")
