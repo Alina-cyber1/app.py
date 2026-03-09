@@ -66,7 +66,6 @@ def load_domain_data(domain_clean):
     # --- Обработка публикаций ---
     if len(publications) > 0:
         if 'publication_date' not in publications.columns:
-            # Возможно колонка называется 'date'
             if 'date' in publications.columns:
                 publications.rename(columns={'date': 'publication_date'}, inplace=True)
             else:
@@ -98,7 +97,6 @@ def load_domain_data(domain_clean):
         monthly_patents = pd.DataFrame(columns=['month', 'patents'])
 
     # --- Объединяем по месяцам ---
-    # Определяем общий диапазон месяцев
     all_months = pd.date_range(
         start=min(monthly_pubs['month'].min() if not monthly_pubs.empty else pd.Timestamp('2015-01-01'),
                   monthly_patents['month'].min() if not monthly_patents.empty else pd.Timestamp('2015-01-01')),
@@ -121,7 +119,6 @@ def load_domain_data(domain_clean):
     else:
         monthly['patents'] = 0
 
-    # Если совсем нет данных, возвращаем пустые массивы
     if monthly['papers'].sum() == 0 and monthly['patents'].sum() == 0:
         return np.array([]), np.array([]), np.array([]), {}
 
@@ -133,7 +130,6 @@ def load_domain_data(domain_clean):
     total_patents = patents.sum()
 
     # --- Метрики роста ---
-    # Годовой рост публикаций
     yearly_pubs = monthly.groupby(monthly['month'].dt.year)['papers'].sum()
     if len(yearly_pubs) >= 2:
         last_year = yearly_pubs.index[-1]
@@ -142,7 +138,6 @@ def load_domain_data(domain_clean):
     else:
         papers_growth = 0.0
 
-    # Годовой рост патентов
     yearly_patents = monthly.groupby(monthly['month'].dt.year)['patents'].sum()
     if len(yearly_patents) >= 2:
         last_year = yearly_patents.index[-1]
@@ -151,13 +146,12 @@ def load_domain_data(domain_clean):
     else:
         patents_growth = 0.0
 
-    # --- Топ заявителей (если есть колонка assignee) ---
+    # --- Топ заявителей ---
     if len(patents_df) > 0 and 'assignee' in patents_df.columns:
         top_assignees_data = patents_df['assignee'].value_counts().head(5)
         top_assignees = top_assignees_data.index.tolist()
         assignee_values = top_assignees_data.values.tolist()
     else:
-        # Заглушки
         if domain_clean == "Полупроводники":
             top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
             assignee_values = [234, 189, 156, 98, 76]
@@ -165,7 +159,7 @@ def load_domain_data(domain_clean):
             top_assignees = ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"]
             assignee_values = [145, 132, 98, 67, 54]
 
-    # --- География (если есть country) ---
+    # --- География ---
     if len(patents_df) > 0 and 'country' in patents_df.columns:
         geo_data = patents_df['country'].value_counts().head(5)
         countries = geo_data.index.tolist()
@@ -178,7 +172,7 @@ def load_domain_data(domain_clean):
             countries = ['US', 'CN', 'EP', 'JP', 'KR']
             country_values = [58, 18, 12, 7, 5]
 
-    # Trend score (по патентам, как раньше)
+    # Trend score
     norm_total = min(100, total_patents / 5000 * 100)
     norm_growth = min(100, max(0, patents_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
