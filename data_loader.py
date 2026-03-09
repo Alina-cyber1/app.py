@@ -5,7 +5,6 @@ from pathlib import Path
 import gdown
 
 # ---------- Константы ----------
-# Папка для данных относительно корня проекта
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -15,9 +14,7 @@ FILES = {
     "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl"
 }
 
-# ---------- Автоматическое скачивание ----------
 def download_files():
-    """Скачивает недостающие файлы с Google Drive."""
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
@@ -25,73 +22,33 @@ def download_files():
             url = f"https://drive.google.com/uc?id={file_id}"
             gdown.download(url, str(dest), quiet=False)
 
-# Вызываем скачивание при импорте модуля
 download_files()
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
-    """
-    Загружает clean-данные для домена.
-    Возвращает (dates, papers, patents, metrics) в формате, ожидаемом app.py.
-    """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
 
-    # Выбираем файл в зависимости от домена
     if domain_clean == "Полупроводники":
         file_name = "semiconductors_clean_full.parquet"
     elif domain_clean == "Генная инженерия":
         file_name = "gene_engineering_clean_full.parquet"
     else:
-        # Возвращаем пустые данные с корректным словарём метрик
-        empty_metrics = {
-            'papers_total': 0,
-            'papers_growth': 0.0,
-            'patents_total': 0,
-            'patents_growth': 0.0,
-            'time_lag': 0,
-            'time_lag_change': 0,
-            'trend_score': 0,
-            'trend_status': '💤 Нет данных',
-            'top_assignees': [],
-            'assignee_values': [],
-            'countries': [],
-            'country_values': [],
-            'ai_share': 0
-        }
-        return np.array([]), np.array([]), np.array([]), empty_metrics
+        return np.array([]), np.array([]), np.array([]), {}
 
     file_path = DATA_DIR / file_name
-
     if not file_path.exists():
         print(f"❌ Файл {file_name} не найден")
-        empty_metrics = {
-            'papers_total': 0,
-            'papers_growth': 0.0,
-            'patents_total': 0,
-            'patents_growth': 0.0,
-            'time_lag': 0,
-            'time_lag_change': 0,
-            'trend_score': 0,
-            'trend_status': '💤 Нет данных',
-            'top_assignees': [],
-            'assignee_values': [],
-            'countries': [],
-            'country_values': [],
-            'ai_share': 0
-        }
-        return np.array([]), np.array([]), np.array([]), empty_metrics
+        return np.array([]), np.array([]), np.array([]), {}
 
-    # Читаем данные
     df = pd.read_parquet(file_path, engine='fastparquet')
     print(f"✅ Загружено строк: {len(df)}")
     print(f"📋 Колонки: {list(df.columns)}")
 
-    # Разделяем публикации и патенты (ожидается колонка 'type')
+    # Разделяем публикации и патенты, если есть колонка type
     if 'type' in df.columns:
         publications = df[df['type'] == 'publication'].copy()
         patents_df = df[df['type'] == 'patent'].copy()
     else:
-        # Если нет колонки type, считаем всё публикациями
         publications = df.copy()
         patents_df = pd.DataFrame()
 
@@ -100,11 +57,9 @@ def load_domain_data(domain_clean):
 
     # --- Обработка публикаций ---
     if len(publications) > 0:
-        # Определяем колонку с датой
         date_col = 'publication_date' if 'publication_date' in publications.columns else ('date' if 'date' in publications.columns else None)
         if date_col is None:
             raise ValueError("Нет колонки с датой публикации")
-
         publications['publication_date'] = pd.to_datetime(publications[date_col], errors='coerce')
         publications = publications.dropna(subset=['publication_date'])
         if len(publications) > 0:
@@ -133,8 +88,11 @@ def load_domain_data(domain_clean):
     else:
         monthly_patents = pd.DataFrame(columns=['month', 'patents'])
 
-    # --- Если нет ни публикаций, ни патентов ---
+    # --- Если нет ни публикаций, ни патентов, возвращаем нулевые данные, но с корректными метриками ---
     if monthly_pubs.empty and monthly_patents.empty:
+        # Создаём хотя бы одну точку, чтобы даты не были пустыми (иначе app.py упадёт)
+        # Возвращаем пустые массивы, а app.js обработает это через проверку data_available
+        # Но для совместимости вернём пустые массивы и словарь с нулями
         empty_metrics = {
             'papers_total': 0,
             'papers_growth': 0.0,
@@ -183,7 +141,6 @@ def load_domain_data(domain_clean):
     total_patents = patents.sum()
 
     # --- Метрики роста ---
-    # Годовой рост публикаций
     yearly_pubs = monthly.groupby(monthly['month'].dt.year)['papers'].sum()
     if len(yearly_pubs) >= 2:
         last_year = yearly_pubs.index[-1]
@@ -192,7 +149,6 @@ def load_domain_data(domain_clean):
     else:
         papers_growth = 0.0
 
-    # Годовой рост патентов
     yearly_patents = monthly.groupby(monthly['month'].dt.year)['patents'].sum()
     if len(yearly_patents) >= 2:
         last_year = yearly_patents.index[-1]
@@ -201,13 +157,12 @@ def load_domain_data(domain_clean):
     else:
         patents_growth = 0.0
 
-    # --- Топ заявителей ---
+    # --- Топ заявителей (заглушки, если нет данных) ---
     if len(patents_df) > 0 and 'assignee' in patents_df.columns:
         top_assignees_data = patents_df['assignee'].value_counts().head(5)
         top_assignees = top_assignees_data.index.tolist()
         assignee_values = top_assignees_data.values.tolist()
     else:
-        # Заглушки для демонстрации
         if domain_clean == "Полупроводники":
             top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
             assignee_values = [234, 189, 156, 98, 76]
@@ -215,7 +170,7 @@ def load_domain_data(domain_clean):
             top_assignees = ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"]
             assignee_values = [145, 132, 98, 67, 54]
 
-    # --- География ---
+    # --- География (заглушки) ---
     if len(patents_df) > 0 and 'country' in patents_df.columns:
         geo_data = patents_df['country'].value_counts().head(5)
         countries = geo_data.index.tolist()
@@ -228,7 +183,7 @@ def load_domain_data(domain_clean):
             countries = ['US', 'CN', 'EP', 'JP', 'KR']
             country_values = [58, 18, 12, 7, 5]
 
-    # Trend score (адаптируем под патенты)
+    # Trend score
     norm_total = min(100, total_patents / 5000 * 100)
     norm_growth = min(100, max(0, patents_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
