@@ -146,6 +146,16 @@ def load_domain_data(domain_clean):
             if sample.empty:
                 print("⚠️ Файл патентов пуст")
             else:
+                # ========== ДИАГНОСТИКА ==========
+                sample_dates = con.execute(f"SELECT publication_date FROM read_parquet('{patents_file}') LIMIT 10").df()
+                print("📅 Примеры publication_date из патентов:")
+                print(sample_dates.to_string(index=False))
+                
+                min_max = con.execute(f"SELECT MIN(publication_date), MAX(publication_date) FROM read_parquet('{patents_file}')").df()
+                print("📅 Мин и макс даты в патентах:")
+                print(min_max.to_string(index=False))
+                # ===============================
+
                 val = sample.iloc[0, 0]
                 # Определяем тип и строим соответствующий запрос
                 if isinstance(val, (int, np.integer)):
@@ -162,6 +172,7 @@ def load_domain_data(domain_clean):
                     """
                 else:
                     # Если строка или дата, используем CAST
+                    print("ℹ️ publication_date в патентах - не целое, используем CAST AS DATE")
                     query_patents = f"""
                         SELECT 
                             strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
