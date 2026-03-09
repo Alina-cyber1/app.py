@@ -10,12 +10,12 @@ import gdown
 DATA_DIR = Path(__file__).parent / "data" / "processed" / "semiconductors"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ID файлов на Google Drive (ЗАМЕНИТЕ НА СВОИ!)
+# ID файлов на Google Drive (ВАШИ РЕАЛЬНЫЕ ID)
 FILES = {
-    "patents.parquet": "1abc...",               # ID файла patents.parquet
-    "cpc.parquet": "2def...",                    # ID файла cpc.parquet
-    "assignee_harmonized.parquet": "3ghi...",    # ID файла assignee_harmonized.parquet
-    "title_localized.parquet": "4jkl..."         # ID файла title_localized.parquet
+    "patents.parquet": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L",
+    "cpc.parquet": "1L98w0Cx7Dh308W70W080dVabzN_34Kwk",
+    "assignee_harmonized.parquet": "1CBRr7564K7hGdd75ffE8IRIvjesolqkd",
+    "title_localized.parquet": "1BfEZRKC7qqWGna9uiqjdxzvhDRke8ZzN"
 }
 
 # ---------- Автоматическое скачивание ----------
@@ -24,11 +24,11 @@ def download_files():
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
-            with st.spinner(f"Скачивание {filename}..."):
-                url = f"https://drive.google.com/uc?id={file_id}"
-                gdown.download(url, str(dest), quiet=False)
+            print(f"📥 Скачивание {filename}...")
+            url = f"https://drive.google.com/uc?id={file_id}"
+            gdown.download(url, str(dest), quiet=False)
 
-# Вызываем скачивание при импорте модуля (т.е. при запуске Streamlit)
+# Вызываем скачивание при импорте модуля
 download_files()
 
 # ---------- Подключение к duckdb ----------
@@ -171,4 +171,4 @@ def load_domain_data(domain_clean):
 
     con.close()
     print(f"✅ Загружено месяцев: {len(dates)}, всего патентов: {total_patents}")
-    return dates, papers, patents, metrics dates, papers, patents, metrics
+    return dates, papers, patents, metrics
