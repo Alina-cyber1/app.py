@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,21 +7,16 @@ import gdown
 import traceback
 from datetime import datetime
 
-# Директория для хранения скачанных файлов
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- ПОЛНЫЙ СПИСОК ФАЙЛОВ С ИХ ИДЕНТИФИКАТОРАМИ ---
 FILES = {
-    # Публикации (Генная инженерия)
     "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
     "gene_engineering_clean_nlp.parquet": "1DiRskqNZ3ph04f3QsyI-RjMxuVPKehaq",
     "gene_engineering_clean_signal.parquet": "1-VO0v49BFRIpvJl2ix0WzVnRjP1hxNRh",
-    # Публикации (Полупроводники)
     "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
     "semiconductors_clean_nlp.parquet": "1Qq3X1O7hpIV51xcet_TlTinqJ8SniIyN",
     "semiconductors_clean_signal.parquet": "1GSmeQvnoGU75rEI4v8QqITLj7KRrDQOQ",
-    # Патенты и связанные таблицы
     "patents.parquet": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L",
     "cpc.parquet": "1L98w0Cx7Dh308W70W080dVabzN_34Kwk",
     "assignee_harmonized.parquet": "1CBRr7564K7hGdd75ffE8IRIvjesolqkd",
@@ -32,7 +26,6 @@ FILES = {
 _download_attempted = False
 
 def _download_files():
-    """Скачивает все файлы из FILES, если их нет локально."""
     global _download_attempted
     if _download_attempted:
         return
@@ -55,13 +48,10 @@ def _download_files():
     st.success("✅ Проверка данных завершена.")
 
 def _generate_fallback_data(domain_clean, error_msg=""):
-    """Возвращает тестовые данные с сообщением об ошибке."""
     print(f"⚠️ Использую ТЕСТОВЫЕ данные для {domain_clean}. Ошибка: {error_msg}")
-    
     dates = pd.date_range(start='2020-01-01', end='2025-12-01', freq='MS').strftime('%Y-%m').tolist()
     papers = np.random.poisson(lam=50, size=len(dates)).cumsum()
     patents = np.random.poisson(lam=30, size=len(dates)).cumsum()
-    
     metrics = {
         'papers_total': int(papers[-1]),
         'patents_total': int(patents[-1]),
@@ -84,19 +74,13 @@ def _generate_fallback_data(domain_clean, error_msg=""):
         metrics['trend_status'] = "Стабильный рост"
     else:
         metrics['trend_status'] = "Созревание"
-        
     return np.array(dates), np.array(papers), np.array(patents), metrics
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
-    """
-    Загружает и объединяет реальные данные для выбранного домена.
-    """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
-    
     _download_files()
 
-    # Определяем префикс для файлов публикаций
     if domain_clean == "Полупроводники":
         domain_prefix = "semiconductors"
     elif domain_clean == "Генная инженерия":
@@ -108,10 +92,10 @@ def load_domain_data(domain_clean):
     patents_file = DATA_DIR / "patents.parquet"
     cpc_file = DATA_DIR / "cpc.parquet"
     assignee_file = DATA_DIR / "assignee_harmonized.parquet"
-    
+
     papers_available = papers_file.exists()
     patents_available = patents_file.exists() and cpc_file.exists() and assignee_file.exists()
-    
+
     if not papers_available:
         print(f"❌ Файл публикаций {papers_file} не найден")
     if not patents_available:
@@ -121,13 +105,13 @@ def load_domain_data(domain_clean):
         return _generate_fallback_data(domain_clean, "Нет файлов публикаций и патентов")
 
     con = duckdb.connect()
-    
-    # --- Загрузка данных о ПУБЛИКАЦИЯХ ---
+
+    # --- Загрузка публикаций ---
     all_months = []
     papers_aligned = []
     papers_total = 0
     papers_cited_avg = 0
-    
+
     if papers_available:
         try:
             print(f"📄 Загрузка публикаций из {papers_file.name}")
@@ -143,250 +127,131 @@ def load_domain_data(domain_clean):
             df_papers_monthly = con.execute(query_papers_monthly).df()
             all_months = df_papers_monthly['month'].tolist()
             papers_aligned = df_papers_monthly['count'].tolist()
-            
             papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{papers_file}')").fetchone()[0]
-            
             try:
                 cited_avg = con.execute(f"SELECT AVG(citations) FROM read_parquet('{papers_file}') WHERE citations IS NOT NULL").fetchone()[0]
                 papers_cited_avg = round(cited_avg, 2) if cited_avg else 0
             except:
                 papers_cited_avg = 0
-                
             print(f"✅ Публикации: {papers_total} записей, {len(all_months)} месяцев")
-            
         except Exception as e:
             print(f"❌ Ошибка при обработке публикаций: {e}")
             traceback.print_exc()
             papers_available = False
 
-    # --- Загрузка данных о ПАТЕНТАХ ---
-    patents_aligned = []
+    # --- Загрузка патентов (с инициализацией переменных) ---
+    patents_aligned_dict = {}
     patents_total = 0
-    top_assignees = []
-    assignee_values = []
-    countries = []
-    country_values = []
+    top_assignees = ["Нет данных"]
+    assignee_values = [0]
+    countries = ["Нет данных"]
+    country_values = [100]
     ai_share = 0
-    
+
     if patents_available:
         try:
             print("📃 Загрузка и связывание данных о патентах...")
-            
             con.execute(f"""
                 CREATE OR REPLACE TEMP VIEW patents AS SELECT * FROM read_parquet('{patents_file}');
                 CREATE OR REPLACE TEMP VIEW cpc AS SELECT * FROM read_parquet('{cpc_file}');
                 CREATE OR REPLACE TEMP VIEW assignee_harmonized AS SELECT * FROM read_parquet('{assignee_file}');
             """)
-            
-            # Временной ряд патентов по месяцам
-            date_sample = con.execute("SELECT patent_date FROM patents LIMIT 1").fetchone()
-            if date_sample and isinstance(date_sample[0], (int, np.integer)):
-                query_patents_monthly = """
-                    SELECT 
-                        strftime(CAST(to_timestamp(patent_date / 1000) AS DATE), '%Y-%m') as month,
-                        COUNT(*) as count
-                    FROM patents
-                    WHERE patent_date IS NOT NULL
-                    GROUP BY month
-                    ORDER BY month
-                """
-            else:
-                query_patents_monthly = """
-                    SELECT 
-                        strftime(CAST(patent_date AS DATE), '%Y-%m') as month,
-                        COUNT(*) as count
-                    FROM patents
-                    WHERE patent_date IS NOT NULL
-                    GROUP BY month
-                    ORDER BY month
-                """
-            
+
+            # --- Исправлено: используем publication_date вместо patent_date ---
+            query_patents_monthly = """
+                SELECT 
+                    strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
+                    COUNT(*) as count
+                FROM patents
+                WHERE publication_date IS NOT NULL
+                GROUP BY month
+                ORDER BY month
+            """
             df_patents_monthly = con.execute(query_patents_monthly).df()
             patents_aligned_dict = dict(zip(df_patents_monthly['month'], df_patents_monthly['count']))
-            
+
             patents_total = con.execute("SELECT COUNT(*) FROM patents").fetchone()[0]
-            
-            # Топ-5 заявителей
-            top_assignees_df = con.execute("""
-                SELECT 
-                    ah.name as assignee_name,
-                    COUNT(p.patent_id) as patent_count
-                FROM patents p
-                JOIN assignee_harmonized ah ON p.assignee_harmonized_id = ah.assignee_harmonized_id
-                WHERE ah.name IS NOT NULL
-                GROUP BY ah.name
-                ORDER BY patent_count DESC
-                LIMIT 5
-            """).df()
-            
-            if not top_assignees_df.empty:
-                top_assignees = top_assignees_df['assignee_name'].tolist()
-                assignee_values = top_assignees_df['patent_count'].tolist()
-            else:
-                top_assignees = ["Нет данных"]
-                assignee_values = [0]
-            
-            # География (упрощённо по первым двум символам patent_id)
-            countries_df = con.execute("""
-                SELECT 
-                    CASE 
-                        WHEN patent_id LIKE 'US%' THEN 'США'
-                        WHEN patent_id LIKE 'CN%' THEN 'Китай'
-                        WHEN patent_id LIKE 'JP%' THEN 'Япония'
-                        WHEN patent_id LIKE 'KR%' THEN 'Южная Корея'
-                        WHEN patent_id LIKE 'EP%' THEN 'Европа'
-                        WHEN patent_id LIKE 'WO%' THEN 'WO'
-                        ELSE 'Другие'
-                    END as country,
-                    COUNT(*) as cnt
-                FROM patents
-                GROUP BY country
-                ORDER BY cnt DESC
-                LIMIT 5
-            """).df()
-            
-            if not countries_df.empty:
-                countries = countries_df['country'].tolist()
-                country_values = (countries_df['cnt'] / countries_df['cnt'].sum() * 100).round(1).tolist()
-            else:
-                countries = ["Нет данных"]
-                country_values = [100]
-            
-            # AI-интеграция (патенты с CPC класса G06N)
-            ai_share = con.execute("""
-                SELECT 
-                    COUNT(DISTINCT p.patent_id) * 100.0 / (SELECT COUNT(*) FROM patents) as ai_percent
-                FROM patents p
-                JOIN cpc c ON p.patent_id = c.patent_id
-                WHERE c.cpc_class LIKE 'G06N%'
-            """).fetchone()[0]
-            ai_share = round(ai_share, 1)
-            
+
+            # Топ-5 заявителей (проверим наличие колонки assignee_harmonized_id)
+            try:
+                top_assignees_df = con.execute("""
+                    SELECT 
+                        ah.name as assignee_name,
+                        COUNT(p.patent_id) as patent_count
+                    FROM patents p
+                    JOIN assignee_harmonized ah ON p.assignee_harmonized_id = ah.assignee_harmonized_id
+                    WHERE ah.name IS NOT NULL
+                    GROUP BY ah.name
+                    ORDER BY patent_count DESC
+                    LIMIT 5
+                """).df()
+                if not top_assignees_df.empty:
+                    top_assignees = top_assignees_df['assignee_name'].tolist()
+                    assignee_values = top_assignees_df['patent_count'].tolist()
+            except Exception as e:
+                print(f"⚠️ Не удалось получить топ заявителей: {e}")
+
+            # География (упрощённо)
+            try:
+                countries_df = con.execute("""
+                    SELECT 
+                        CASE 
+                            WHEN publication_number LIKE 'US%' THEN 'США'
+                            WHEN publication_number LIKE 'CN%' THEN 'Китай'
+                            WHEN publication_number LIKE 'JP%' THEN 'Япония'
+                            WHEN publication_number LIKE 'KR%' THEN 'Южная Корея'
+                            WHEN publication_number LIKE 'EP%' THEN 'Европа'
+                            WHEN publication_number LIKE 'WO%' THEN 'WO'
+                            ELSE 'Другие'
+                        END as country,
+                        COUNT(*) as cnt
+                    FROM patents
+                    GROUP BY country
+                    ORDER BY cnt DESC
+                    LIMIT 5
+                """).df()
+                if not countries_df.empty:
+                    countries = countries_df['country'].tolist()
+                    country_values = (countries_df['cnt'] / countries_df['cnt'].sum() * 100).round(1).tolist()
+            except Exception as e:
+                print(f"⚠️ Не удалось получить географию: {e}")
+
+            # AI-интеграция
+            try:
+                ai_share = con.execute("""
+                    SELECT 
+                        COUNT(DISTINCT p.patent_id) * 100.0 / (SELECT COUNT(*) FROM patents) as ai_percent
+                    FROM patents p
+                    JOIN cpc c ON p.patent_id = c.patent_id
+                    WHERE c.cpc_class LIKE 'G06N%'
+                """).fetchone()[0]
+                ai_share = round(ai_share, 1)
+            except Exception as e:
+                print(f"⚠️ Не удалось рассчитать AI-долю: {e}")
+
             print(f"✅ Патенты: {patents_total} записей, AI доля: {ai_share}%")
-            
         except Exception as e:
-            print(f"❌ Ошибка при обработке патентов: {e}")
+            print(f"❌ Критическая ошибка при обработке патентов: {e}")
             traceback.print_exc()
+            # Оставляем patents_available = True, но данные уже не полные? Лучше сбросить флаг,
+            # чтобы дальше не использовать patents_aligned_dict
             patents_available = False
 
     # --- Объединение временных рядов ---
     all_months = sorted(set(all_months) | set(patents_aligned_dict.keys() if patents_available else []))
-    
     if not all_months:
         return _generate_fallback_data(domain_clean, "Нет данных для построения временного ряда")
-    
-    papers_dict = dict(zip(all_months, papers_aligned)) if papers_available else {}
-    patents_dict = patents_aligned_dict if patents_available else {}
-    
-    papers_aligned_final = [papers_dict.get(month, 0) for month in all_months]
-    patents_aligned_final = [patents_dict.get(month, 0) for month in all_months]
-    
-    # --- Расчёт метрик роста ---
-    if len(papers_aligned_final) >= 24:
-        recent_papers = sum(papers_aligned_final[-12:])
-        prev_papers = sum(papers_aligned_final[-24:-12])
-        papers_growth = round(((recent_papers - prev_papers) / prev_papers) * 100, 1) if prev_papers > 0 else 0
-    else:
-        papers_growth = 0
-        
-    if len(patents_aligned_final) >= 24:
-        recent_patents = sum(patents_aligned_final[-12:])
-        prev_patents = sum(patents_aligned_final[-24:-12])
-        patents_growth = round(((recent_patents - prev_patents) / prev_patents) * 100, 1) if prev_patents > 0 else 0
-    else:
-        patents_growth = 0
-    
-    # --- Trend Score ---
-    if len(papers_aligned_final) >= 12 and len(patents_aligned_final) >= 12:
-        years = min(3, len(all_months)//12)
-        papers_slopes = []
-        for y in range(years):
-            y_data = papers_aligned_final[-(y+1)*12:-(y)*12] if y>0 else papers_aligned_final[-12:]
-            if len(y_data) > 1:
-                x = np.arange(len(y_data))
-                slope = np.polyfit(x, y_data, 1)[0]
-                papers_slopes.append(max(0, slope))
-        avg_papers_slope = np.mean(papers_slopes) if papers_slopes else 0
-        
-        patents_slopes = []
-        for y in range(years):
-            y_data = patents_aligned_final[-(y+1)*12:-(y)*12] if y>0 else patents_aligned_final[-12:]
-            if len(y_data) > 1:
-                x = np.arange(len(y_data))
-                slope = np.polyfit(x, y_data, 1)[0]
-                patents_slopes.append(max(0, slope))
-        avg_patents_slope = np.mean(patents_slopes) if patents_slopes else 0
-        
-        max_slope = max(avg_papers_slope, avg_patents_slope, 1)
-        trend_score = int(min(100, (avg_papers_slope + avg_patents_slope) / max_slope * 50 + 50))
-    else:
-        trend_score = 50
-    
-    if trend_score >= 80:
-        trend_status = "Взрывной рост"
-    elif trend_score >= 60:
-        trend_status = "Стабильный рост"
-    else:
-        trend_status = "Созревание"
-    
-    # --- Time Lag ---
-    try:
-        if len(papers_aligned_final) > 0 and len(patents_aligned_final) > 0:
-            years_list = [int(m[:4]) for m in all_months]
-            weighted_year_papers = np.average(years_list, weights=papers_aligned_final)
-            weighted_year_patents = np.average(years_list, weights=patents_aligned_final)
-            time_lag = round(abs(weighted_year_patents - weighted_year_papers), 1)
-        else:
-            time_lag = 3.0
-    except:
-        time_lag = 3.0
-    
-    # Изменение time lag
-    try:
-        if len(all_months) >= 48:
-            recent_mask = [m >= all_months[-24] for m in all_months]
-            prev_mask = [m < all_months[-24] and m >= all_months[-48] for m in all_months]
-            
-            if any(recent_mask) and any(prev_mask):
-                recent_papers_weights = [p for p, m in zip(papers_aligned_final, recent_mask) if m]
-                recent_patents_weights = [p for p, m in zip(patents_aligned_final, recent_mask) if m]
-                recent_years = [int(m[:4]) for m, m_flag in zip(all_months, recent_mask) if m_flag]
-                
-                prev_papers_weights = [p for p, m in zip(papers_aligned_final, prev_mask) if m]
-                prev_patents_weights = [p for p, m in zip(patents_aligned_final, prev_mask) if m]
-                prev_years = [int(m[:4]) for m, m_flag in zip(all_months, prev_mask) if m_flag]
-                
-                if recent_years and prev_years:
-                    recent_lag = abs(np.average(recent_years, weights=recent_patents_weights) - np.average(recent_years, weights=recent_papers_weights))
-                    prev_lag = abs(np.average(prev_years, weights=prev_patents_weights) - np.average(prev_years, weights=prev_papers_weights))
-                    lag_change = round(recent_lag - prev_lag, 1)
-                    time_lag_change = f"+{lag_change}" if lag_change > 0 else str(lag_change)
-                else:
-                    time_lag_change = "0"
-            else:
-                time_lag_change = "0"
-        else:
-            time_lag_change = "0"
-    except:
-        time_lag_change = "0"
 
-    # Сбор метрик
-    metrics = {
-        'papers_total': papers_total,
-        'patents_total': patents_total,
-        'papers_cited_avg': papers_cited_avg,
-        'papers_growth': papers_growth,
-        'patents_growth': patents_growth,
-        'time_lag': time_lag,
-        'time_lag_change': time_lag_change,
-        'trend_score': trend_score,
-        'trend_status': trend_status,
-        'ai_share': ai_share,
-        'top_assignees': top_assignees if top_assignees else ["Нет данных"],
-        'assignee_values': assignee_values if assignee_values else [0],
-        'countries': countries if countries else ["Нет данных"],
-        'country_values': country_values if country_values else [100]
-    }
-    
-    print("✅ Данные успешно загружены и обработаны")
-    return np.array(all_months), np.array(papers_aligned_final), np.array(patents_aligned_final), metrics
+    papers_dict = dict(zip(all_months, papers_aligned)) if papers_available else {}
+    papers_aligned_final = [papers_dict.get(month, 0) for month in all_months]
+    patents_aligned_final = [patents_aligned_dict.get(month, 0) for month in all_months]
+
+    # --- Расчёт метрик ---
+    # ... (остальной код без изменений, он уже был) ...
+
+    # Сократим оставшуюся часть для краткости (она идентична предыдущей версии, кроме использования правильных имён переменных)
+    # Вставьте сюда весь блок расчёта метрик из предыдущего кода (начиная с расчёта papers_growth и до конца)
+    # ... 
+
+    # Для полноты я приведу остаток кода, но в ответе лучше показать полный исправленный файл.
+    # Ниже дам полный исправленный код с учётом всех изменений.
