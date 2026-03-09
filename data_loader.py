@@ -3,23 +3,43 @@ import duckdb
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+import gdown
 
-# Путь к папке с данными (задайте свой)
-DATA_DIR = Path("/mount/src/app.py/data/semiconductors")  # для Streamlit Cloud
-# Для локальной разработки можно использовать другой путь, например:
-# DATA_DIR = Path("C:/Users/.../semiconductors")
+# ---------- Константы ----------
+# Папка для данных относительно корня проекта
+DATA_DIR = Path(__file__).parent / "data" / "processed" / "semiconductors"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# ID файлов на Google Drive (ЗАМЕНИТЕ НА СВОИ!)
+FILES = {
+    "patents.parquet": "1abc...",               # ID файла patents.parquet
+    "cpc.parquet": "2def...",                    # ID файла cpc.parquet
+    "assignee_harmonized.parquet": "3ghi...",    # ID файла assignee_harmonized.parquet
+    "title_localized.parquet": "4jkl..."         # ID файла title_localized.parquet
+}
+
+# ---------- Автоматическое скачивание ----------
+def download_files():
+    """Скачивает недостающие файлы с Google Drive."""
+    for filename, file_id in FILES.items():
+        dest = DATA_DIR / filename
+        if not dest.exists():
+            with st.spinner(f"Скачивание {filename}..."):
+                url = f"https://drive.google.com/uc?id={file_id}"
+                gdown.download(url, str(dest), quiet=False)
+
+# Вызываем скачивание при импорте модуля (т.е. при запуске Streamlit)
+download_files()
+
+# ---------- Подключение к duckdb ----------
 @st.cache_resource
 def _get_duckdb_connection(domain):
     """Создаёт подключение с view для всех таблиц."""
-    # Здесь можно учесть домен, если папки разные
-    data_path = DATA_DIR
     con = duckdb.connect()
-    con.execute(f"CREATE VIEW patents AS SELECT * FROM '{data_path}/patents.parquet'")
-    con.execute(f"CREATE VIEW cpc AS SELECT * FROM '{data_path}/cpc.parquet'")
-    con.execute(f"CREATE VIEW assignee AS SELECT * FROM '{data_path}/assignee_harmonized.parquet'")
-    con.execute(f"CREATE VIEW title AS SELECT * FROM '{data_path}/title_localized.parquet'")
+    con.execute(f"CREATE VIEW patents AS SELECT * FROM '{DATA_DIR}/patents.parquet'")
+    con.execute(f"CREATE VIEW cpc AS SELECT * FROM '{DATA_DIR}/cpc.parquet'")
+    con.execute(f"CREATE VIEW assignee AS SELECT * FROM '{DATA_DIR}/assignee_harmonized.parquet'")
+    con.execute(f"CREATE VIEW title AS SELECT * FROM '{DATA_DIR}/title_localized.parquet'")
     return con
 
 def _cpc_filter(domain):
@@ -61,16 +81,13 @@ def load_domain_data(domain_clean):
     df_patents = con.execute(query_monthly).df()
 
     if df_patents.empty:
-        # Если данных нет, возвращаем пустые массивы
         return np.array([]), np.array([]), np.array([]), {}
 
-    # Преобразуем в форматы, ожидаемые app.py
     dates = df_patents['month'].values
     patents = df_patents['patent_count'].values
-    # Пока публикаций нет, ставим нули
-    papers = np.zeros_like(patents)
+    papers = np.zeros_like(patents)  # публикаций пока нет
 
-    # 2. Топ-10 заявителей (для метрик)
+    # 2. Топ-10 заявителей
     query_top = f"""
         SELECT 
             a.name AS assignee,
@@ -88,11 +105,10 @@ def load_domain_data(domain_clean):
         top_assignees = top_df['assignee'].tolist()
         assignee_values = top_df['cnt'].tolist()
     else:
-        # Заглушки
         top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
         assignee_values = [234, 189, 156, 98, 76]
 
-    # 3. География (страны) – группируем по country_code из patents
+    # 3. География (страны)
     query_geo = f"""
         SELECT 
             p.country_code,
@@ -112,9 +128,8 @@ def load_domain_data(domain_clean):
         countries = ['US', 'CN', 'JP', 'KR', 'EP']
         country_values = [45, 25, 12, 10, 8]
 
-    # 4. Вычисляем метрики роста (YoY, Trend score) на основе patents
+    # 4. Метрики роста
     total_patents = patents.sum()
-    # Годовой рост: сравниваем последний полный год с предыдущим
     years = pd.to_datetime(dates).year
     yearly = pd.Series(patents, index=years).groupby(level=0).sum()
     if len(yearly) >= 2:
@@ -124,11 +139,10 @@ def load_domain_data(domain_clean):
     else:
         patents_growth = 0.0
 
-    # Публикаций пока нет, ставим нулевой рост
     papers_growth = 0.0
     total_papers = 0
 
-    # Trend score (адаптируем под патенты)
+    # Trend score
     norm_total = min(100, total_patents / 5000 * 100)
     norm_growth = min(100, max(0, patents_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
@@ -139,7 +153,6 @@ def load_domain_data(domain_clean):
     else:
         trend_status = '💤 Mature'
 
-    # Дополнительные метрики (можно подставить реальные, когда появятся)
     metrics = {
         'papers_total': total_papers,
         'papers_growth': round(papers_growth, 1),
@@ -158,4 +171,4 @@ def load_domain_data(domain_clean):
 
     con.close()
     print(f"✅ Загружено месяцев: {len(dates)}, всего патентов: {total_patents}")
-    return dates, papers, patents, metrics
+    return dates, papers, patents, metrics dates, papers, patents, metrics
