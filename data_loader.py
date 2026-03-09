@@ -1,26 +1,21 @@
 import streamlit as st
-import duckdb
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import gdown
 
 # ---------- Константы ----------
-# Папка для данных относительно корня проекта
-DATA_DIR = Path(__file__).parent / "data" / "processed" / "semiconductors"
+DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ID файлов на Google Drive (ВАШИ РЕАЛЬНЫЕ ID)
+# ID файлов на Google Drive (clean-датасеты)
 FILES = {
-    "patents.parquet": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L",
-    "cpc.parquet": "1L98w0Cx7Dh308W70W080dVabzN_34Kwk",
-    "assignee_harmonized.parquet": "1CBRr7564K7hGdd75ffE8IRIvjesolqkd",
-    "title_localized.parquet": "1BfEZRKC7qqWGna9uiqjdxzvhDRke8ZzN"
+    "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
+    "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl"
 }
 
 # ---------- Автоматическое скачивание ----------
 def download_files():
-    """Скачивает недостающие файлы с Google Drive."""
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
@@ -28,122 +23,162 @@ def download_files():
             url = f"https://drive.google.com/uc?id={file_id}"
             gdown.download(url, str(dest), quiet=False)
 
-# Вызываем скачивание при импорте модуля
 download_files()
-
-# ---------- Подключение к duckdb ----------
-@st.cache_resource
-def _get_duckdb_connection(domain):
-    """Создаёт подключение с view для всех таблиц."""
-    con = duckdb.connect()
-    con.execute(f"CREATE VIEW patents AS SELECT * FROM '{DATA_DIR}/patents.parquet'")
-    con.execute(f"CREATE VIEW cpc AS SELECT * FROM '{DATA_DIR}/cpc.parquet'")
-    con.execute(f"CREATE VIEW assignee AS SELECT * FROM '{DATA_DIR}/assignee_harmonized.parquet'")
-    con.execute(f"CREATE VIEW title AS SELECT * FROM '{DATA_DIR}/title_localized.parquet'")
-    return con
-
-def _cpc_filter(domain):
-    """Возвращает SQL-условие для фильтрации по CPC."""
-    if domain == "Полупроводники":
-        return "(c.code LIKE 'H01L%' OR c.code LIKE 'H10%' OR c.code LIKE 'G03F%')"
-    elif domain == "Генная инженерия":
-        return "(c.code LIKE 'A61K48%' OR c.code LIKE 'C12N15%' OR c.code LIKE 'C12N9/22%')"
-    else:
-        return "1=1"
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
     """
-    Загружает РЕАЛЬНЫЕ данные (патенты) через duckdb.
+    Загружает clean-данные для домена.
     Возвращает (dates, papers, patents, metrics) в формате, ожидаемом app.py.
     """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
 
-    con = _get_duckdb_connection(domain_clean)
-    cpc_condition = _cpc_filter(domain_clean)
-
-    # 1. Месячная агрегация патентов (семейства)
-    # Преобразуем priority_date (BIGINT) в timestamp (предполагаем секунды с эпохи)
-    query_monthly = f"""
-        WITH domain_pubs AS (
-            SELECT DISTINCT c.publication_number
-            FROM cpc c
-            WHERE {cpc_condition}
-        )
-        SELECT 
-            DATE_TRUNC('month', to_timestamp(p.priority_date / 1000))::DATE AS month,
-            COUNT(DISTINCT p.family_id) AS patent_count
-        FROM patents p
-        JOIN domain_pubs dp ON p.publication_number = dp.publication_number
-        WHERE p.priority_date IS NOT NULL
-        GROUP BY month
-        ORDER BY month
-    """
-    df_patents = con.execute(query_monthly).df()
-
-    if df_patents.empty:
+    # Выбираем файл в зависимости от домена
+    if domain_clean == "Полупроводники":
+        file_name = "semiconductors_clean_full.parquet"
+    elif domain_clean == "Генная инженерия":
+        file_name = "gene_engineering_clean_full.parquet"
+    else:
         return np.array([]), np.array([]), np.array([]), {}
 
-    dates = df_patents['month'].values
-    patents = df_patents['patent_count'].values
-    papers = np.zeros_like(patents)  # публикаций пока нет
+    file_path = DATA_DIR / file_name
 
-    # 2. Топ-10 заявителей
-    query_top = f"""
-        SELECT 
-            a.name AS assignee,
-            COUNT(DISTINCT p.family_id) AS cnt
-        FROM patents p
-        JOIN assignee a ON p.publication_number = a.publication_number
-        JOIN cpc c ON p.publication_number = c.publication_number
-        WHERE {cpc_condition}
-        GROUP BY a.name
-        ORDER BY cnt DESC
-        LIMIT 10
-    """
-    top_df = con.execute(query_top).df()
-    if not top_df.empty:
-        top_assignees = top_df['assignee'].tolist()
-        assignee_values = top_df['cnt'].tolist()
+    if not file_path.exists():
+        print(f"❌ Файл {file_name} не найден")
+        return np.array([]), np.array([]), np.array([]), {}
+
+    # Читаем данные
+    df = pd.read_parquet(file_path, engine='fastparquet')
+    print(f"✅ Загружено строк: {len(df)}")
+    print(f"📋 Колонки: {list(df.columns)}")
+
+    # Разделяем публикации и патенты (ожидается колонка 'type')
+    if 'type' in df.columns:
+        publications = df[df['type'] == 'publication'].copy()
+        patents_df = df[df['type'] == 'patent'].copy()
     else:
-        top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
-        assignee_values = [234, 189, 156, 98, 76]
+        publications = df.copy()
+        patents_df = pd.DataFrame()
 
-    # 3. География (страны)
-    query_geo = f"""
-        SELECT 
-            p.country_code,
-            COUNT(DISTINCT p.family_id) AS cnt
-        FROM patents p
-        JOIN cpc c ON p.publication_number = c.publication_number
-        WHERE {cpc_condition}
-        GROUP BY p.country_code
-        ORDER BY cnt DESC
-        LIMIT 5
-    """
-    geo_df = con.execute(query_geo).df()
-    if not geo_df.empty:
-        countries = geo_df['country_code'].tolist()
-        country_values = geo_df['cnt'].tolist()
+    print(f"📄 Публикаций: {len(publications)}")
+    print(f"📃 Патентов: {len(patents_df)}")
+
+    # --- Обработка публикаций ---
+    if len(publications) > 0:
+        if 'publication_date' not in publications.columns:
+            # Возможно колонка называется 'date'
+            if 'date' in publications.columns:
+                publications.rename(columns={'date': 'publication_date'}, inplace=True)
+            else:
+                raise ValueError("Нет колонки с датой публикации")
+
+        publications['publication_date'] = pd.to_datetime(publications['publication_date'], errors='coerce')
+        publications = publications.dropna(subset=['publication_date'])
+        publications['month'] = publications['publication_date'].dt.to_period('M')
+        monthly_pubs = publications.groupby('month').size().reset_index(name='papers')
+        monthly_pubs['month'] = monthly_pubs['month'].dt.to_timestamp()
     else:
-        countries = ['US', 'CN', 'JP', 'KR', 'EP']
-        country_values = [45, 25, 12, 10, 8]
+        monthly_pubs = pd.DataFrame(columns=['month', 'papers'])
 
-    # 4. Метрики роста
+    # --- Обработка патентов ---
+    if len(patents_df) > 0:
+        if 'publication_date' not in patents_df.columns:
+            if 'date' in patents_df.columns:
+                patents_df.rename(columns={'date': 'publication_date'}, inplace=True)
+            else:
+                patents_df = pd.DataFrame()
+
+    if len(patents_df) > 0:
+        patents_df['publication_date'] = pd.to_datetime(patents_df['publication_date'], errors='coerce')
+        patents_df = patents_df.dropna(subset=['publication_date'])
+        patents_df['month'] = patents_df['publication_date'].dt.to_period('M')
+        monthly_patents = patents_df.groupby('month').size().reset_index(name='patents')
+        monthly_patents['month'] = monthly_patents['month'].dt.to_timestamp()
+    else:
+        monthly_patents = pd.DataFrame(columns=['month', 'patents'])
+
+    # --- Объединяем по месяцам ---
+    # Определяем общий диапазон месяцев
+    all_months = pd.date_range(
+        start=min(monthly_pubs['month'].min() if not monthly_pubs.empty else pd.Timestamp('2015-01-01'),
+                  monthly_patents['month'].min() if not monthly_patents.empty else pd.Timestamp('2015-01-01')),
+        end=max(monthly_pubs['month'].max() if not monthly_pubs.empty else pd.Timestamp.now(),
+                monthly_patents['month'].max() if not monthly_patents.empty else pd.Timestamp.now()),
+        freq='MS'
+    )
+
+    monthly = pd.DataFrame({'month': all_months})
+
+    if not monthly_pubs.empty:
+        monthly = monthly.merge(monthly_pubs[['month', 'papers']], on='month', how='left')
+        monthly['papers'] = monthly['papers'].fillna(0).astype(int)
+    else:
+        monthly['papers'] = 0
+
+    if not monthly_patents.empty:
+        monthly = monthly.merge(monthly_patents[['month', 'patents']], on='month', how='left')
+        monthly['patents'] = monthly['patents'].fillna(0).astype(int)
+    else:
+        monthly['patents'] = 0
+
+    # Если совсем нет данных, возвращаем пустые массивы
+    if monthly['papers'].sum() == 0 and monthly['patents'].sum() == 0:
+        return np.array([]), np.array([]), np.array([]), {}
+
+    dates = monthly['month'].values
+    papers = monthly['papers'].values
+    patents = monthly['patents'].values
+
+    total_papers = papers.sum()
     total_patents = patents.sum()
-    years = pd.to_datetime(dates).year
-    yearly = pd.Series(patents, index=years).groupby(level=0).sum()
-    if len(yearly) >= 2:
-        last_year = yearly.index[-1]
-        prev_year = yearly.index[-2]
-        patents_growth = ((yearly[last_year] / yearly[prev_year]) - 1) * 100
+
+    # --- Метрики роста ---
+    # Годовой рост публикаций
+    yearly_pubs = monthly.groupby(monthly['month'].dt.year)['papers'].sum()
+    if len(yearly_pubs) >= 2:
+        last_year = yearly_pubs.index[-1]
+        prev_year = yearly_pubs.index[-2]
+        papers_growth = ((yearly_pubs[last_year] / yearly_pubs[prev_year]) - 1) * 100
+    else:
+        papers_growth = 0.0
+
+    # Годовой рост патентов
+    yearly_patents = monthly.groupby(monthly['month'].dt.year)['patents'].sum()
+    if len(yearly_patents) >= 2:
+        last_year = yearly_patents.index[-1]
+        prev_year = yearly_patents.index[-2]
+        patents_growth = ((yearly_patents[last_year] / yearly_patents[prev_year]) - 1) * 100
     else:
         patents_growth = 0.0
 
-    papers_growth = 0.0
-    total_papers = 0
+    # --- Топ заявителей (если есть колонка assignee) ---
+    if len(patents_df) > 0 and 'assignee' in patents_df.columns:
+        top_assignees_data = patents_df['assignee'].value_counts().head(5)
+        top_assignees = top_assignees_data.index.tolist()
+        assignee_values = top_assignees_data.values.tolist()
+    else:
+        # Заглушки
+        if domain_clean == "Полупроводники":
+            top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
+            assignee_values = [234, 189, 156, 98, 76]
+        else:
+            top_assignees = ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"]
+            assignee_values = [145, 132, 98, 67, 54]
 
-    # Trend score
+    # --- География (если есть country) ---
+    if len(patents_df) > 0 and 'country' in patents_df.columns:
+        geo_data = patents_df['country'].value_counts().head(5)
+        countries = geo_data.index.tolist()
+        country_values = geo_data.values.tolist()
+    else:
+        if domain_clean == "Полупроводники":
+            countries = ['US', 'CN', 'JP', 'KR', 'EP']
+            country_values = [45, 25, 12, 10, 8]
+        else:
+            countries = ['US', 'CN', 'EP', 'JP', 'KR']
+            country_values = [58, 18, 12, 7, 5]
+
+    # Trend score (по патентам, как раньше)
     norm_total = min(100, total_patents / 5000 * 100)
     norm_growth = min(100, max(0, patents_growth * 2))
     trend_score = int((norm_total + norm_growth) / 2)
@@ -155,21 +190,23 @@ def load_domain_data(domain_clean):
         trend_status = '💤 Mature'
 
     metrics = {
-        'papers_total': total_papers,
+        'papers_total': int(total_papers),
         'papers_growth': round(papers_growth, 1),
-        'patents_total': total_patents,
+        'patents_total': int(total_patents),
         'patents_growth': round(patents_growth, 1),
-        'time_lag': 3.2 if 'Полупроводники' in domain_clean else 4.8,
-        'time_lag_change': -0.5 if 'Полупроводники' in domain_clean else -1.2,
+        'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
+        'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
         'trend_score': trend_score,
         'trend_status': trend_status,
-        'top_assignees': top_assignees[:5],
-        'assignee_values': assignee_values[:5],
+        'top_assignees': top_assignees,
+        'assignee_values': assignee_values,
         'countries': countries,
         'country_values': country_values,
-        'ai_share': 32 if 'Полупроводники' in domain_clean else 18
+        'ai_share': 32 if domain_clean == "Полупроводники" else 18
     }
 
-    con.close()
-    print(f"✅ Загружено месяцев: {len(dates)}, всего патентов: {total_patents}")
+    print(f"📈 Всего публикаций: {total_papers}")
+    print(f"📊 Всего патентов: {total_patents}")
+    print(f"📊 Trend Score: {trend_score} - {trend_status}")
+
     return dates, papers, patents, metrics
