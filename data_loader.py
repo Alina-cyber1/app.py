@@ -136,62 +136,61 @@ def load_domain_data(domain_clean):
             traceback.print_exc()
             # В случае ошибки обнуляем, но продолжаем
 
-    # ----- Патенты (если файл есть) -----
+     # ----- Патенты (если файл есть) -----
     if patents_available:
         try:
             size_mb = patents_file.stat().st_size / (1024*1024)
             print(f"✅ Файл патентов: {patents_file} ({size_mb:.1f} MB)")
 
-            # Проверим тип колонки publication_date
-            sample = con.execute(f"SELECT publication_date FROM read_parquet('{patents_file}') LIMIT 1").df()
-            if sample.empty:
-                print("⚠️ Файл патентов пуст")
-            else:
-                # ========== ДИАГНОСТИКА ==========
-                sample_dates = con.execute(f"SELECT publication_date FROM read_parquet('{patents_file}') LIMIT 10").df()
-                print("📅 Примеры publication_date из патентов:")
-                print(sample_dates.to_string(index=False))
-                
-                min_max = con.execute(f"SELECT MIN(publication_date), MAX(publication_date) FROM read_parquet('{patents_file}')").df()
-                print("📅 Мин и макс даты в патентах:")
-                print(min_max.to_string(index=False))
-                # ===============================
+            # Прочитаем первые несколько строк напрямую, чтобы увидеть значения
+            sample_df = con.execute(f"SELECT publication_date FROM read_parquet('{patents_file}') LIMIT 10").df()
+            print("📅 Первые 10 значений publication_date из патентов (сырые):")
+            print(sample_df.to_string(index=False))
+            
+            # Узнаем тип данных колонки
+            dtype_info = con.execute(f"SELECT typeof(publication_date) FROM read_parquet('{patents_file}') LIMIT 1").df()
+            print(f"📅 Тип данных publication_date: {dtype_info.iloc[0,0]}")
+            
+            # Минимальное и максимальное значение
+            min_max = con.execute(f"SELECT MIN(publication_date), MAX(publication_date) FROM read_parquet('{patents_file}')").df()
+            print("📅 Мин и макс даты в патентах (сырые):")
+            print(min_max.to_string(index=False))
 
-                val = sample.iloc[0, 0]
-                # Определяем тип и строим соответствующий запрос
-                if isinstance(val, (int, np.integer)):
-                    # Предполагаем, что это Unix timestamp в миллисекундах -> делим на 1000
-                    print("ℹ️ publication_date в патентах - целое число, интерпретируем как миллисекунды (делим на 1000)")
-                    query_patents = f"""
-                        SELECT 
-                            strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
-                            COUNT(*) as count
-                        FROM read_parquet('{patents_file}')
-                        WHERE publication_date IS NOT NULL
-                        GROUP BY month
-                        ORDER BY month
-                    """
-                else:
-                    # Если строка или дата, используем CAST
-                    print("ℹ️ publication_date в патентах - не целое, используем CAST AS DATE")
-                    query_patents = f"""
-                        SELECT 
-                            strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
-                            COUNT(*) as count
-                        FROM read_parquet('{patents_file}')
-                        WHERE publication_date IS NOT NULL
-                        GROUP BY month
-                        ORDER BY month
-                    """
-                df_patents = con.execute(query_patents).df()
-                dates_patents = df_patents['month'].tolist()
-                patents_counts = df_patents['count'].tolist()
-                print(f"📊 Патенты: найдено {len(dates_patents)} месяцев, всего {sum(patents_counts)} записей")
-                patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{patents_file}')").fetchone()[0]
+            # Теперь пробуем преобразовать
+            val = sample_df.iloc[0,0]
+            if isinstance(val, (int, np.integer)):
+                print("ℹ️ publication_date - целое число, пробуем деление на 1000")
+                query_patents = f"""
+                    SELECT 
+                        strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
+                        COUNT(*) as count
+                    FROM read_parquet('{patents_file}')
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
+            else:
+                print("ℹ️ publication_date - не целое, пробуем CAST AS DATE")
+                query_patents = f"""
+                    SELECT 
+                        strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
+                        COUNT(*) as count
+                    FROM read_parquet('{patents_file}')
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
+            df_patents = con.execute(query_patents).df()
+            dates_patents = df_patents['month'].tolist()
+            patents_counts = df_patents['count'].tolist()
+            print(f"📊 Патенты после преобразования: найдено {len(dates_patents)} месяцев, всего {sum(patents_counts)} записей")
+            patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{patents_file}')").fetchone()[0]
         except Exception as e:
             print(f"❌ Ошибка при обработке патентов: {e}")
             traceback.print_exc()
             # Оставляем патенты нулевыми
+
+    
 
     # ----- Объединение временных рядов -----
     all_months = sorted(set(dates_papers) | set(dates_patents))
