@@ -10,7 +10,7 @@ import traceback
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Словарь с именами файлов и их Google Drive ID (из ваших ссылок)
+# Словарь с именами файлов и их Google Drive ID
 FILES = {
     "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
     "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
@@ -20,12 +20,10 @@ FILES = {
 _download_attempted = False
 
 def _download_files():
-    """Скачивает файлы, если их нет. Вызывается внутри load_domain_data."""
     global _download_attempted
     if _download_attempted:
         return
     _download_attempted = True
-    
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
@@ -74,10 +72,9 @@ def load_domain_data(domain_clean):
     """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
     
-    # Скачиваем файлы (если ещё не скачаны)
     _download_files()
 
-    # Определяем файл публикаций в зависимости от домена
+    # Определяем файл публикаций
     if domain_clean == "Полупроводники":
         papers_file = DATA_DIR / "semiconductors_clean_full.parquet"
     elif domain_clean == "Генная инженерия":
@@ -88,7 +85,6 @@ def load_domain_data(domain_clean):
 
     patents_file = DATA_DIR / "patents.parquet"
 
-    # Проверяем наличие файлов
     papers_available = papers_file.exists()
     patents_available = patents_file.exists()
     
@@ -97,7 +93,6 @@ def load_domain_data(domain_clean):
     if not patents_available:
         print(f"⚠️ Файл патентов {patents_file} не найден (патенты будут нулевыми)")
 
-    # Если нет ни одного файла – сразу fallback
     if not papers_available and not patents_available:
         return _generate_fallback_data()
 
@@ -113,7 +108,6 @@ def load_domain_data(domain_clean):
             size_mb = papers_file.stat().st_size / (1024*1024)
             print(f"✅ Файл публикаций: {papers_file} ({size_mb:.1f} MB)")
 
-            # Помесячная статистика
             query_papers = f"""
                 SELECT 
                     strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
@@ -128,10 +122,8 @@ def load_domain_data(domain_clean):
             papers_counts = df_papers['count'].tolist()
             print(f"📊 Публикации: найдено {len(dates_papers)} месяцев, всего {sum(papers_counts)} записей")
 
-            # Общее число публикаций
             papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{papers_file}')").fetchone()[0]
 
-            # Среднее цитирование (если есть колонка citations)
             try:
                 cited_avg = con.execute(f"SELECT AVG(citations) FROM read_parquet('{papers_file}') WHERE citations IS NOT NULL").fetchone()[0]
                 cited_avg = round(cited_avg, 2) if cited_avg else 0
@@ -141,7 +133,7 @@ def load_domain_data(domain_clean):
         except Exception as e:
             print(f"❌ Ошибка при обработке публикаций: {e}")
             traceback.print_exc()
-            # В случае ошибки просто обнуляем, но продолжаем
+            # В случае ошибки обнуляем, но продолжаем
 
     # ----- Патенты (если файл есть) -----
     if patents_available:
@@ -149,22 +141,36 @@ def load_domain_data(domain_clean):
             size_mb = patents_file.stat().st_size / (1024*1024)
             print(f"✅ Файл патентов: {patents_file} ({size_mb:.1f} MB)")
 
-            # Проверим, есть ли колонка publication_date
-            # Если нет, то патенты будут нулевыми
-            query_check = f"SELECT * FROM read_parquet('{patents_file}') LIMIT 1"
-            sample = con.execute(query_check).df()
-            if 'publication_date' not in sample.columns:
-                print("⚠️ В файле патентов нет колонки publication_date, патенты будут нулевыми")
+            # Проверим тип колонки publication_date
+            sample = con.execute(f"SELECT publication_date FROM read_parquet('{patents_file}') LIMIT 1").df()
+            if sample.empty:
+                print("⚠️ Файл патентов пуст")
             else:
-                query_patents = f"""
-                    SELECT 
-                        strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
-                        COUNT(*) as count
-                    FROM read_parquet('{patents_file}')
-                    WHERE publication_date IS NOT NULL
-                    GROUP BY month
-                    ORDER BY month
-                """
+                val = sample.iloc[0, 0]
+                # Определяем тип и строим соответствующий запрос
+                if isinstance(val, (int, np.integer)):
+                    # Предполагаем, что это Unix timestamp в секундах
+                    print("ℹ️ publication_date в патентах - целое число, интерпретируем как Unix timestamp (секунды)")
+                    query_patents = f"""
+                        SELECT 
+                            strftime(CAST(to_timestamp(publication_date) AS DATE), '%Y-%m') as month,
+                            COUNT(*) as count
+                        FROM read_parquet('{patents_file}')
+                        WHERE publication_date IS NOT NULL
+                        GROUP BY month
+                        ORDER BY month
+                    """
+                else:
+                    # Если строка или дата, используем CAST
+                    query_patents = f"""
+                        SELECT 
+                            strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
+                            COUNT(*) as count
+                        FROM read_parquet('{patents_file}')
+                        WHERE publication_date IS NOT NULL
+                        GROUP BY month
+                        ORDER BY month
+                    """
                 df_patents = con.execute(query_patents).df()
                 dates_patents = df_patents['month'].tolist()
                 patents_counts = df_patents['count'].tolist()
@@ -173,6 +179,7 @@ def load_domain_data(domain_clean):
         except Exception as e:
             print(f"❌ Ошибка при обработке патентов: {e}")
             traceback.print_exc()
+            # Оставляем патенты нулевыми
 
     # ----- Объединение временных рядов -----
     all_months = sorted(set(dates_papers) | set(dates_patents))
@@ -188,8 +195,7 @@ def load_domain_data(domain_clean):
 
     print(f"📅 Всего месяцев в объединённом ряду: {len(all_months)}")
 
-    # ----- Заглушки для дополнительных метрик (можно заменить позже) -----
-    # Эти метрики пока не рассчитываются из данных, оставляем случайные/фиксированные
+    # ----- Заглушки для дополнительных метрик -----
     if papers_total > 0 or patents_total > 0:
         papers_growth = round(np.random.uniform(5, 15), 1)
         patents_growth = round(np.random.uniform(8, 20), 1)
@@ -208,7 +214,6 @@ def load_domain_data(domain_clean):
         countries = ['США', 'Китай', 'Япония', 'Южная Корея', 'Германия']
         country_values = [45, 30, 15, 7, 3]
     else:
-        # Если данных совсем нет – fallback
         return _generate_fallback_data()
 
     metrics = {
