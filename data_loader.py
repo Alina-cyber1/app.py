@@ -75,6 +75,7 @@ def load_domain_data(domain_clean):
         df_papers = con.execute(query_papers).df()
         dates_papers = df_papers['month'].tolist()
         papers_counts = df_papers['count'].tolist()
+        print(f"📊 Найдено {len(dates_papers)} месяцев с публикациями")
     except Exception as e:
         print(f"Ошибка при обработке публикаций: {e}")
         dates_papers, papers_counts = [], []
@@ -111,13 +112,14 @@ def load_domain_data(domain_clean):
             dates_patents = df_patents['month'].tolist()
             patents_counts = df_patents['count'].tolist()
             patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{patents_file}')").fetchone()[0]
+            print(f"📊 Найдено {len(dates_patents)} месяцев с патентами")
         except Exception as e:
             print(f"Ошибка при обработке патентов: {e}")
 
     # ----- Объединение временных рядов -----
     all_months = sorted(set(dates_papers) | set(dates_patents))
     if not all_months:
-        # Нет данных ни по одному из источников
+        print("⚠️ Нет данных ни по одному из источников, возвращаем заглушки.")
         # Возвращаем пустые массивы, но метрики заполняем нулями (чтобы не было KeyError)
         empty_metrics = {
             'papers_total': 0,
@@ -145,7 +147,7 @@ def load_domain_data(domain_clean):
 
     # ----- Расчёт дополнительных метрик (заглушки, пока нет реальных данных) -----
     # В будущем здесь будет реальная логика
-    if papers_total > 0 and patents_total > 0:
+    if papers_total > 0 or patents_total > 0:
         papers_growth = round(np.random.uniform(5, 15), 1)      # пример
         patents_growth = round(np.random.uniform(8, 20), 1)     # пример
         time_lag = round(np.random.uniform(2.5, 4.5), 1)        # пример
