@@ -1,235 +1,147 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import duckdb
 from pathlib import Path
 import gdown
 
+# Директория для хранения скачанных файлов
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ID файлов на Google Drive (можно заменить на *_clean_signal.parquet при необходимости)
+# Соответствие имён файлов и их Google Drive ID
 FILES = {
     "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
-    "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl"
+    "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
+    "patents.parquet": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L"
 }
 
-def download_files():
+def download_all_files():
+    """Скачивает файлы из FILES, если они ещё не существуют."""
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
-            print(f"📥 Скачивание {filename}...")
-            url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, str(dest), quiet=False)
+            with st.spinner(f"Скачивание {filename}..."):
+                url = f"https://drive.google.com/uc?id={file_id}"
+                gdown.download(url, str(dest), quiet=False)
+                print(f"✅ Скачан {filename}")
 
-download_files()
+# Проверяем наличие файлов при каждом запуске (быстро, т.к. проверка существования)
+download_all_files()
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)  # кэшируем результат на 1 час
 def load_domain_data(domain_clean):
+    """
+    Загружает данные для указанного домена.
+    Возвращает:
+        dates: np.array месяцев в формате 'YYYY-MM'
+        papers: np.array количества публикаций по месяцам
+        patents: np.array количества патентов по месяцам
+        metrics: dict с общими метриками
+    """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
 
+    # Определяем файл публикаций в зависимости от домена
     if domain_clean == "Полупроводники":
-        file_name = "semiconductors_clean_full.parquet"
+        papers_file = DATA_DIR / "semiconductors_clean_full.parquet"
     elif domain_clean == "Генная инженерия":
-        file_name = "gene_engineering_clean_full.parquet"
+        papers_file = DATA_DIR / "gene_engineering_clean_full.parquet"
     else:
         return np.array([]), np.array([]), np.array([]), {}
 
-    file_path = DATA_DIR / file_name
-    if not file_path.exists():
-        print(f"❌ Файл {file_name} не найден")
+    patents_file = DATA_DIR / "patents.parquet"
+
+    # Проверка наличия файлов
+    if not papers_file.exists():
+        st.error(f"❌ Файл публикаций не найден: {papers_file}")
+        return np.array([]), np.array([]), np.array([]), {}
+    if not patents_file.exists():
+        st.warning("⚠️ Файл патентов отсутствует, статистика по патентам будет нулевой.")
+        # Продолжаем, патенты будут пустыми
+
+    con = duckdb.connect()
+
+    # ----- Публикации: помесячная статистика -----
+    query_papers_monthly = f"""
+        SELECT 
+            strftime(publication_date, '%Y-%m') as month,
+            COUNT(*) as count
+        FROM read_parquet('{papers_file}')
+        WHERE publication_date IS NOT NULL
+        GROUP BY month
+        ORDER BY month
+    """
+    try:
+        df_papers = con.execute(query_papers_monthly).df()
+        dates_papers = df_papers['month'].tolist() if not df_papers.empty else []
+        papers_counts = df_papers['count'].tolist() if not df_papers.empty else []
+    except Exception as e:
+        print(f"Ошибка обработки публикаций: {e}")
+        dates_papers, papers_counts = [], []
+
+    # ----- Общее число публикаций и среднее цитирование -----
+    query_papers_total = f"SELECT COUNT(*) FROM read_parquet('{papers_file}')"
+    try:
+        papers_total = con.execute(query_papers_total).fetchone()[0]
+    except:
+        papers_total = 0
+
+    query_cited_avg = f"SELECT AVG(cited_by_count) FROM read_parquet('{papers_file}') WHERE cited_by_count IS NOT NULL"
+    try:
+        cited_avg = con.execute(query_cited_avg).fetchone()[0]
+        cited_avg = round(cited_avg, 2) if cited_avg else 0
+    except:
+        cited_avg = 0
+
+    # ----- Патенты: помесячная статистика (если файл существует) -----
+    if patents_file.exists():
+        query_patents_monthly = f"""
+            SELECT 
+                strftime(publication_date, '%Y-%m') as month,
+                COUNT(*) as count
+            FROM read_parquet('{patents_file}')
+            WHERE publication_date IS NOT NULL
+            GROUP BY month
+            ORDER BY month
+        """
+        try:
+            df_patents = con.execute(query_patents_monthly).df()
+            dates_patents = df_patents['month'].tolist() if not df_patents.empty else []
+            patents_counts = df_patents['count'].tolist() if not df_patents.empty else []
+        except Exception as e:
+            print(f"Ошибка обработки патентов: {e}")
+            dates_patents, patents_counts = [], []
+
+        query_patents_total = f"SELECT COUNT(*) FROM read_parquet('{patents_file}')"
+        try:
+            patents_total = con.execute(query_patents_total).fetchone()[0]
+        except:
+            patents_total = 0
+    else:
+        dates_patents, patents_counts = [], []
+        patents_total = 0
+
+    # ----- Выравнивание временных рядов по месяцам -----
+    all_months = sorted(set(dates_papers) | set(dates_patents))
+    if not all_months:
+        # Нет данных вообще
         return np.array([]), np.array([]), np.array([]), {}
 
-    df = pd.read_parquet(file_path, engine='fastparquet')
-    print(f"✅ Загружено строк: {len(df)}")
-    print(f"📋 Колонки: {list(df.columns)}")
+    papers_dict = dict(zip(dates_papers, papers_counts))
+    patents_dict = dict(zip(dates_patents, patents_counts))
 
-    # Пытаемся разделить публикации и патенты, если есть колонка type
-    if 'type' in df.columns:
-        publications = df[df['type'] == 'publication'].copy()
-        patents_df = df[df['type'] == 'patent'].copy()
-    else:
-        # Если нет type, считаем всё публикациями
-        publications = df.copy()
-        patents_df = pd.DataFrame()
+    papers_aligned = [papers_dict.get(month, 0) for month in all_months]
+    patents_aligned = [patents_dict.get(month, 0) for month in all_months]
 
-    print(f"📄 Публикаций: {len(publications)}")
-    print(f"📃 Патентов: {len(patents_df)}")
-
-    # --- Обработка публикаций ---
-    if len(publications) > 0:
-        date_col = 'publication_date' if 'publication_date' in publications.columns else ('date' if 'date' in publications.columns else None)
-        if date_col is None:
-            raise ValueError("Нет колонки с датой публикации")
-        publications['publication_date'] = pd.to_datetime(publications[date_col], errors='coerce')
-        publications = publications.dropna(subset=['publication_date'])
-        if len(publications) > 0:
-            publications['month'] = publications['publication_date'].dt.to_period('M')
-            monthly_pubs = publications.groupby('month').size().reset_index(name='papers')
-            monthly_pubs['month'] = monthly_pubs['month'].dt.to_timestamp()
-        else:
-            monthly_pubs = pd.DataFrame(columns=['month', 'papers'])
-    else:
-        monthly_pubs = pd.DataFrame(columns=['month', 'papers'])
-
-    # --- Обработка патентов ---
-    if len(patents_df) > 0:
-        date_col = 'publication_date' if 'publication_date' in patents_df.columns else ('date' if 'date' in patents_df.columns else None)
-        if date_col:
-            patents_df['publication_date'] = pd.to_datetime(patents_df[date_col], errors='coerce')
-            patents_df = patents_df.dropna(subset=['publication_date'])
-            if len(patents_df) > 0:
-                patents_df['month'] = patents_df['publication_date'].dt.to_period('M')
-                monthly_patents = patents_df.groupby('month').size().reset_index(name='patents')
-                monthly_patents['month'] = monthly_patents['month'].dt.to_timestamp()
-            else:
-                monthly_patents = pd.DataFrame(columns=['month', 'patents'])
-        else:
-            monthly_patents = pd.DataFrame(columns=['month', 'patents'])
-    else:
-        monthly_patents = pd.DataFrame(columns=['month', 'patents'])
-
-    # --- Определяем общий диапазон дат ---
-    # Если нет данных, возвращаем пустой результат с заглушками
-    if monthly_pubs.empty and monthly_patents.empty:
-        print("⚠️ Нет данных для построения временного ряда")
-        empty_metrics = {
-            'papers_total': 0,
-            'papers_growth': 0.0,
-            'patents_total': 0,
-            'patents_growth': 0.0,
-            'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
-            'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
-            'trend_score': 0,
-            'trend_status': '💤 Mature',
-            'top_assignees': ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"] if domain_clean == "Полупроводники" else ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"],
-            'assignee_values': [234, 189, 156, 98, 76] if domain_clean == "Полупроводники" else [145, 132, 98, 67, 54],
-            'countries': ['US', 'CN', 'JP', 'KR', 'EP'] if domain_clean == "Полупроводники" else ['US', 'CN', 'EP', 'JP', 'KR'],
-            'country_values': [45, 25, 12, 10, 8] if domain_clean == "Полупроводники" else [58, 18, 12, 7, 5],
-            'ai_share': 32 if domain_clean == "Полупроводники" else 18
-        }
-        return np.array([]), np.array([]), np.array([]), empty_metrics
-
-    all_months = pd.date_range(
-        start=min(monthly_pubs['month'].min() if not monthly_pubs.empty else pd.Timestamp('2015-01-01'),
-                  monthly_patents['month'].min() if not monthly_patents.empty else pd.Timestamp('2015-01-01')),
-        end=max(monthly_pubs['month'].max() if not monthly_pubs.empty else pd.Timestamp.now(),
-                monthly_patents['month'].max() if not monthly_patents.empty else pd.Timestamp.now()),
-        freq='MS'
-    )
-
-    monthly = pd.DataFrame({'month': all_months})
-
-    if not monthly_pubs.empty:
-        monthly = monthly.merge(monthly_pubs[['month', 'papers']], on='month', how='left')
-        monthly['papers'] = monthly['papers'].fillna(0).astype(int)
-    else:
-        monthly['papers'] = 0
-
-    if not monthly_patents.empty:
-        monthly = monthly.merge(monthly_patents[['month', 'patents']], on='month', how='left')
-        monthly['patents'] = monthly['patents'].fillna(0).astype(int)
-    else:
-        monthly['patents'] = 0
-
-    dates = monthly['month'].values
-    papers = monthly['papers'].values
-    patents = monthly['patents'].values
-
-    total_papers = papers.sum()
-    total_patents = patents.sum()
-
-    # --- Если после обработки нет данных (все нули) ---
-    if total_papers == 0 and total_patents == 0:
-        print("⚠️ Данные есть, но все нули (возможно, неверные даты)")
-        empty_metrics = {
-            'papers_total': 0,
-            'papers_growth': 0.0,
-            'patents_total': 0,
-            'patents_growth': 0.0,
-            'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
-            'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
-            'trend_score': 0,
-            'trend_status': '💤 Mature',
-            'top_assignees': ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"] if domain_clean == "Полупроводники" else ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"],
-            'assignee_values': [234, 189, 156, 98, 76] if domain_clean == "Полупроводники" else [145, 132, 98, 67, 54],
-            'countries': ['US', 'CN', 'JP', 'KR', 'EP'] if domain_clean == "Полупроводники" else ['US', 'CN', 'EP', 'JP', 'KR'],
-            'country_values': [45, 25, 12, 10, 8] if domain_clean == "Полупроводники" else [58, 18, 12, 7, 5],
-            'ai_share': 32 if domain_clean == "Полупроводники" else 18
-        }
-        return np.array([]), np.array([]), np.array([]), empty_metrics
-
-    # --- Метрики роста ---
-    yearly_pubs = monthly.groupby(monthly['month'].dt.year)['papers'].sum()
-    if len(yearly_pubs) >= 2:
-        last_year = yearly_pubs.index[-1]
-        prev_year = yearly_pubs.index[-2]
-        papers_growth = ((yearly_pubs[last_year] / yearly_pubs[prev_year]) - 1) * 100
-    else:
-        papers_growth = 0.0
-
-    yearly_patents = monthly.groupby(monthly['month'].dt.year)['patents'].sum()
-    if len(yearly_patents) >= 2:
-        last_year = yearly_patents.index[-1]
-        prev_year = yearly_patents.index[-2]
-        patents_growth = ((yearly_patents[last_year] / yearly_patents[prev_year]) - 1) * 100
-    else:
-        patents_growth = 0.0
-
-    # --- Топ заявителей (заглушки, если нет данных) ---
-    if len(patents_df) > 0 and 'assignee' in patents_df.columns:
-        top_assignees_data = patents_df['assignee'].value_counts().head(5)
-        top_assignees = top_assignees_data.index.tolist()
-        assignee_values = top_assignees_data.values.tolist()
-    else:
-        if domain_clean == "Полупроводники":
-            top_assignees = ["TSMC", "Intel", "Samsung", "Qualcomm", "Micron"]
-            assignee_values = [234, 189, 156, 98, 76]
-        else:
-            top_assignees = ["Editas Medicine", "CRISPR Therapeutics", "Intellia", "Vertex", "Moderna"]
-            assignee_values = [145, 132, 98, 67, 54]
-
-    # --- География (заглушки) ---
-    if len(patents_df) > 0 and 'country' in patents_df.columns:
-        geo_data = patents_df['country'].value_counts().head(5)
-        countries = geo_data.index.tolist()
-        country_values = geo_data.values.tolist()
-    else:
-        if domain_clean == "Полупроводники":
-            countries = ['US', 'CN', 'JP', 'KR', 'EP']
-            country_values = [45, 25, 12, 10, 8]
-        else:
-            countries = ['US', 'CN', 'EP', 'JP', 'KR']
-            country_values = [58, 18, 12, 7, 5]
-
-    # Trend score
-    norm_total = min(100, total_patents / 5000 * 100)
-    norm_growth = min(100, max(0, patents_growth * 2))
-    trend_score = int((norm_total + norm_growth) / 2)
-    if trend_score > 80:
-        trend_status = '🔥 Hot'
-    elif trend_score > 60:
-        trend_status = '📈 Emerging'
-    else:
-        trend_status = '💤 Mature'
-
+    # ----- Метрики -----
     metrics = {
-        'papers_total': int(total_papers),
-        'papers_growth': round(papers_growth, 1),
-        'patents_total': int(total_patents),
-        'patents_growth': round(patents_growth, 1),
-        'time_lag': 3.2 if domain_clean == "Полупроводники" else 4.8,
-        'time_lag_change': -0.5 if domain_clean == "Полупроводники" else -1.2,
-        'trend_score': trend_score,
-        'trend_status': trend_status,
-        'top_assignees': top_assignees[:5],
-        'assignee_values': assignee_values[:5],
-        'countries': countries,
-        'country_values': country_values,
-        'ai_share': 32 if domain_clean == "Полупроводники" else 18
+        'papers_total': papers_total,
+        'patents_total': patents_total,
+        'papers_cited_avg': cited_avg,
+        # Сюда можно добавить другие метрики по необходимости
     }
 
-    print(f"📈 Всего публикаций: {total_papers}")
-    print(f"📊 Всего патентов: {total_patents}")
-    print(f"📊 Trend Score: {trend_score} - {trend_status}")
+    print(f"✅ Метрики: {metrics}")
+    print(f"📊 Всего месяцев в рядах: {len(all_months)}")
 
-    return dates, papers, patents, metrics
+    return np.array(all_months), np.array(papers_aligned), np.array(patents_aligned), metrics
