@@ -9,7 +9,7 @@ import gdown
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Соответствие имён файлов и их Google Drive ID
+# Словарь с именами файлов и их Google Drive ID
 FILES = {
     "semiconductors_clean_full.parquet": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
     "gene_engineering_clean_full.parquet": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
@@ -17,7 +17,7 @@ FILES = {
 }
 
 def download_all_files():
-    """Скачивает файлы из FILES, если они ещё не существуют."""
+    """Скачивает файлы, если они ещё не существуют на диске."""
     for filename, file_id in FILES.items():
         dest = DATA_DIR / filename
         if not dest.exists():
@@ -26,10 +26,10 @@ def download_all_files():
                 gdown.download(url, str(dest), quiet=False)
                 print(f"✅ Скачан {filename}")
 
-# Проверяем наличие файлов при каждом запуске (быстро, т.к. проверка существования)
+# Вызываем скачивание при импорте модуля
 download_all_files()
 
-@st.cache_data(ttl=3600)  # кэшируем результат на 1 час
+@st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
     """
     Загружает данные для указанного домена.
@@ -51,18 +51,19 @@ def load_domain_data(domain_clean):
 
     patents_file = DATA_DIR / "patents.parquet"
 
-    # Проверка наличия файлов
+    # Проверяем наличие файлов
     if not papers_file.exists():
         st.error(f"❌ Файл публикаций не найден: {papers_file}")
         return np.array([]), np.array([]), np.array([]), {}
     if not patents_file.exists():
         st.warning("⚠️ Файл патентов отсутствует, статистика по патентам будет нулевой.")
-        # Продолжаем, патенты будут пустыми
+        # Продолжаем без патентов
 
     con = duckdb.connect()
 
     # ----- Публикации: помесячная статистика -----
-    query_papers_monthly = f"""
+    # Предполагаем, что в данных есть колонка publication_date
+    query_papers = f"""
         SELECT 
             strftime(publication_date, '%Y-%m') as month,
             COUNT(*) as count
@@ -72,30 +73,32 @@ def load_domain_data(domain_clean):
         ORDER BY month
     """
     try:
-        df_papers = con.execute(query_papers_monthly).df()
-        dates_papers = df_papers['month'].tolist() if not df_papers.empty else []
-        papers_counts = df_papers['count'].tolist() if not df_papers.empty else []
+        df_papers = con.execute(query_papers).df()
+        dates_papers = df_papers['month'].tolist()
+        papers_counts = df_papers['count'].tolist()
     except Exception as e:
-        print(f"Ошибка обработки публикаций: {e}")
+        print(f"Ошибка при обработке публикаций: {e}")
         dates_papers, papers_counts = [], []
 
-    # ----- Общее число публикаций и среднее цитирование -----
-    query_papers_total = f"SELECT COUNT(*) FROM read_parquet('{papers_file}')"
+    # Общее число публикаций
     try:
-        papers_total = con.execute(query_papers_total).fetchone()[0]
+        papers_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{papers_file}')").fetchone()[0]
     except:
         papers_total = 0
 
-    query_cited_avg = f"SELECT AVG(cited_by_count) FROM read_parquet('{papers_file}') WHERE cited_by_count IS NOT NULL"
+    # Среднее цитирование (если есть колонка cited_by_count)
     try:
-        cited_avg = con.execute(query_cited_avg).fetchone()[0]
+        cited_avg = con.execute(f"SELECT AVG(cited_by_count) FROM read_parquet('{papers_file}') WHERE cited_by_count IS NOT NULL").fetchone()[0]
         cited_avg = round(cited_avg, 2) if cited_avg else 0
     except:
         cited_avg = 0
 
-    # ----- Патенты: помесячная статистика (если файл существует) -----
+    # ----- Патенты: помесячная статистика -----
+    dates_patents, patents_counts = [], []
+    patents_total = 0
+
     if patents_file.exists():
-        query_patents_monthly = f"""
+        query_patents = f"""
             SELECT 
                 strftime(publication_date, '%Y-%m') as month,
                 COUNT(*) as count
@@ -105,26 +108,17 @@ def load_domain_data(domain_clean):
             ORDER BY month
         """
         try:
-            df_patents = con.execute(query_patents_monthly).df()
-            dates_patents = df_patents['month'].tolist() if not df_patents.empty else []
-            patents_counts = df_patents['count'].tolist() if not df_patents.empty else []
+            df_patents = con.execute(query_patents).df()
+            dates_patents = df_patents['month'].tolist()
+            patents_counts = df_patents['count'].tolist()
+            patents_total = con.execute(f"SELECT COUNT(*) FROM read_parquet('{patents_file}')").fetchone()[0]
         except Exception as e:
-            print(f"Ошибка обработки патентов: {e}")
-            dates_patents, patents_counts = [], []
+            print(f"Ошибка при обработке патентов: {e}")
 
-        query_patents_total = f"SELECT COUNT(*) FROM read_parquet('{patents_file}')"
-        try:
-            patents_total = con.execute(query_patents_total).fetchone()[0]
-        except:
-            patents_total = 0
-    else:
-        dates_patents, patents_counts = [], []
-        patents_total = 0
-
-    # ----- Выравнивание временных рядов по месяцам -----
+    # ----- Объединение временных рядов -----
     all_months = sorted(set(dates_papers) | set(dates_patents))
     if not all_months:
-        # Нет данных вообще
+        # Нет данных ни по одному из источников
         return np.array([]), np.array([]), np.array([]), {}
 
     papers_dict = dict(zip(dates_papers, papers_counts))
@@ -137,8 +131,7 @@ def load_domain_data(domain_clean):
     metrics = {
         'papers_total': papers_total,
         'patents_total': patents_total,
-        'papers_cited_avg': cited_avg,
-        # Сюда можно добавить другие метрики по необходимости
+        'papers_cited_avg': cited_avg
     }
 
     print(f"✅ Метрики: {metrics}")
