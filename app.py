@@ -343,22 +343,57 @@ with st.sidebar:
             st.code(traceback.format_exc())
         st.stop()
 
-    # Применяем фильтры по годам
+    # ========== ИСПРАВЛЕНО: фильтрация по годам с обработкой разных форматов дат ==========
     start_year, end_year = year_range
-    mask_years = [int(d[:4]) >= start_year and int(d[:4]) <= end_year for d in dates]
-    dates_filtered = np.array(dates)[mask_years]
-    papers_filtered = np.array(papers)[mask_years]
-    patents_filtered = np.array(patents)[mask_years]
 
-    # Метрики производительности (без psutil)
+    def extract_year(date_str):
+        """Извлекает год из строки даты в разных форматах"""
+        try:
+            if date_str and isinstance(date_str, str):
+                # Формат 'YYYY-MM'
+                if len(date_str) >= 4 and date_str[:4].isdigit():
+                    return int(date_str[:4])
+                # Формат 'YYYY'
+                elif date_str.isdigit() and len(date_str) == 4:
+                    return int(date_str)
+        except:
+            pass
+        return None
+
+    # Создаем маску для фильтрации
+    mask_years = []
+    valid_dates_count = 0
+    for d in dates:
+        year = extract_year(d)
+        if year is not None:
+            valid_dates_count += 1
+            if start_year <= year <= end_year:
+                mask_years.append(True)
+            else:
+                mask_years.append(False)
+        else:
+            # Если год не удалось извлечь, пропускаем
+            mask_years.append(False)
+    
+    # Применяем фильтры
+    if any(mask_years):
+        dates_filtered = np.array(dates)[mask_years]
+        papers_filtered = np.array(papers)[mask_years]
+        patents_filtered = np.array(patents)[mask_years]
+    else:
+        # Если фильтр ничего не дал, показываем все данные
+        dates_filtered = np.array(dates)
+        papers_filtered = np.array(papers)
+        patents_filtered = np.array(patents)
+        st.info(f"📊 Показаны все данные (не удалось применить фильтр по годам)")
+
+    # Метрики производительности
     try:
-        # Пытаемся получить информацию о памяти из /proc (работает в Linux)
         with open('/proc/self/statm') as f:
             memory_pages = int(f.read().split()[0])
             page_size = os.sysconf('SC_PAGESIZE')
             memory_usage = memory_pages * page_size / 1024 / 1024
     except:
-        # Если не получается, просто ставим 0
         memory_usage = 0
 
     status_col1, status_col2 = st.columns(2)
