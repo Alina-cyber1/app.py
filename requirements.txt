@@ -9,3 +9,4 @@ numpy==1.26.4
 reportlab==4.2.2
 gdown
 duckdb
+psutil==6.1.1
