@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import os
 import traceback
 import time
-import psutil
 
 print("🚀 app.py начал выполняться")
 # Импортируем наш загрузчик данных
@@ -351,9 +350,16 @@ with st.sidebar:
     papers_filtered = np.array(papers)[mask_years]
     patents_filtered = np.array(patents)[mask_years]
 
-    # Метрики производительности
-    process = psutil.Process()
-    memory_usage = process.memory_info().rss / 1024 / 1024
+    # Метрики производительности (без psutil)
+    try:
+        # Пытаемся получить информацию о памяти из /proc (работает в Linux)
+        with open('/proc/self/statm') as f:
+            memory_pages = int(f.read().split()[0])
+            page_size = os.sysconf('SC_PAGESIZE')
+            memory_usage = memory_pages * page_size / 1024 / 1024
+    except:
+        # Если не получается, просто ставим 0
+        memory_usage = 0
 
     status_col1, status_col2 = st.columns(2)
     with status_col1:
