@@ -151,19 +151,39 @@ def load_domain_data(domain_clean):
     if patents_available:
         try:
             print("📃 Загрузка и связывание данных о патентах...")
+            
+            # Загружаем данные
             con.execute(f"""
                 CREATE OR REPLACE TEMP VIEW patents AS SELECT * FROM read_parquet('{patents_file}');
                 CREATE OR REPLACE TEMP VIEW cpc AS SELECT * FROM read_parquet('{cpc_file}');
                 CREATE OR REPLACE TEMP VIEW assignee_harmonized AS SELECT * FROM read_parquet('{assignee_file}');
             """)
-
+            
+            # ДИАГНОСТИКА - узнаем реальные имена колонок
+            patents_cols = con.execute("DESCRIBE patents").df()['column_name'].tolist()
+            assignee_cols = con.execute("DESCRIBE assignee_harmonized").df()['column_name'].tolist()
+            cpc_cols = con.execute("DESCRIBE cpc").df()['column_name'].tolist()
+            
+            print("📊 Колонки в patents:", patents_cols)
+            print("📊 Колонки в assignee_harmonized:", assignee_cols)
+            print("📊 Колонки в cpc:", cpc_cols)
+            
+            # Определяем правильные имена колонок для связки
+            patent_id_col = 'publication_number'  # По умолчанию
+            if 'patent_id' in patents_cols:
+                patent_id_col = 'patent_id'
+            elif 'publication_number' in patents_cols:
+                patent_id_col = 'publication_number'
+            
+            assignee_id_col = patent_id_col  # Обычно такое же имя
+            
             # --- ИСПРАВЛЕНО: определяем тип publication_date и преобразуем ---
             date_sample = con.execute("SELECT publication_date FROM patents LIMIT 1").fetchone()
             if date_sample and isinstance(date_sample[0], (int, np.integer)):
                 # Unix timestamp в миллисекундах
-                query_patents_monthly = """
+                query_patents_monthly = f"""
                     SELECT 
-                        strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
+                        strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%%Y-%%m') as month,
                         COUNT(*) as count
                     FROM patents
                     WHERE publication_date IS NOT NULL
@@ -172,9 +192,9 @@ def load_domain_data(domain_clean):
                 """
             else:
                 # Дата в другом формате
-                query_patents_monthly = """
+                query_patents_monthly = f"""
                     SELECT 
-                        strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
+                        strftime(CAST(publication_date AS DATE), '%%Y-%%m') as month,
                         COUNT(*) as count
                     FROM patents
                     WHERE publication_date IS NOT NULL
@@ -187,36 +207,62 @@ def load_domain_data(domain_clean):
 
             patents_total = con.execute("SELECT COUNT(*) FROM patents").fetchone()[0]
 
-            # Топ-5 заявителей
+            # Топ-5 заявителей - ИСПРАВЛЕНО
             try:
-                top_assignees_df = con.execute("""
+                # Проверяем, есть ли нужные колонки в assignee_harmonized
+                if 'name' in assignee_cols:
+                    name_col = 'name'
+                elif 'assignee_name' in assignee_cols:
+                    name_col = 'assignee_name'
+                else:
+                    name_col = assignee_cols[0]  # берем первую колонку
+                
+                top_assignees_df = con.execute(f"""
                     SELECT 
-                        ah.name as assignee_name,
-                        COUNT(p.patent_id) as patent_count
+                        ah.{name_col} as assignee_name,
+                        COUNT(p.{patent_id_col}) as patent_count
                     FROM patents p
-                    JOIN assignee_harmonized ah ON p.assignee_harmonized_id = ah.assignee_harmonized_id
-                    WHERE ah.name IS NOT NULL
-                    GROUP BY ah.name
+                    JOIN assignee_harmonized ah ON p.{patent_id_col} = ah.{assignee_id_col}
+                    WHERE ah.{name_col} IS NOT NULL
+                    GROUP BY ah.{name_col}
                     ORDER BY patent_count DESC
                     LIMIT 5
                 """).df()
                 if not top_assignees_df.empty:
                     top_assignees = top_assignees_df['assignee_name'].tolist()
                     assignee_values = top_assignees_df['patent_count'].tolist()
+                    print("✅ Топ заявителей получен")
             except Exception as e:
                 print(f"⚠️ Не удалось получить топ заявителей: {e}")
+                # Пробуем альтернативный запрос
+                try:
+                    top_assignees_df = con.execute(f"""
+                        SELECT 
+                            'Assignee ' || row_number() OVER (ORDER BY COUNT(*) DESC) as assignee_name,
+                            COUNT(*) as patent_count
+                        FROM patents p
+                        GROUP BY p.{patent_id_col}
+                        ORDER BY patent_count DESC
+                        LIMIT 5
+                    """).df()
+                    if not top_assignees_df.empty:
+                        top_assignees = top_assignees_df['assignee_name'].tolist()
+                        assignee_values = top_assignees_df['patent_count'].tolist()
+                        print("✅ Топ заявителей (альтернативный запрос)")
+                except:
+                    pass
 
-            # География (по publication_number)
+            # География (по publication_number) - ИСПРАВЛЕНО
             try:
-                countries_df = con.execute("""
+                countries_df = con.execute(f"""
                     SELECT 
                         CASE 
-                            WHEN publication_number LIKE 'US%' THEN 'США'
-                            WHEN publication_number LIKE 'CN%' THEN 'Китай'
-                            WHEN publication_number LIKE 'JP%' THEN 'Япония'
-                            WHEN publication_number LIKE 'KR%' THEN 'Южная Корея'
-                            WHEN publication_number LIKE 'EP%' THEN 'Европа'
-                            WHEN publication_number LIKE 'WO%' THEN 'WO'
+                            WHEN publication_number LIKE 'US%%' THEN 'США'
+                            WHEN publication_number LIKE 'CN%%' THEN 'Китай'
+                            WHEN publication_number LIKE 'JP%%' THEN 'Япония'
+                            WHEN publication_number LIKE 'KR%%' THEN 'Южная Корея'
+                            WHEN publication_number LIKE 'EP%%' THEN 'Европа'
+                            WHEN publication_number LIKE 'WO%%' THEN 'WO'
                             ELSE 'Другие'
                         END as country,
                         COUNT(*) as cnt
@@ -227,20 +273,35 @@ def load_domain_data(domain_clean):
                 """).df()
                 if not countries_df.empty:
                     countries = countries_df['country'].tolist()
-                    country_values = (countries_df['cnt'] / countries_df['cnt'].sum() * 100).round(1).tolist()
+                    total = countries_df['cnt'].sum()
+                    country_values = (countries_df['cnt'] / total * 100).round(1).tolist()
+                    print("✅ География получена")
             except Exception as e:
                 print(f"⚠️ Не удалось получить географию: {e}")
 
-            # AI-интеграция
+            # AI-интеграция - ИСПРАВЛЕНО
             try:
-                ai_share = con.execute("""
+                # Определяем колонку с CPC кодом
+                if 'cpc_class' in cpc_cols:
+                    cpc_code_col = 'cpc_class'
+                elif 'cpc_code' in cpc_cols:
+                    cpc_code_col = 'cpc_code'
+                else:
+                    cpc_code_col = cpc_cols[0]
+                
+                ai_result = con.execute(f"""
                     SELECT 
-                        COUNT(DISTINCT p.patent_id) * 100.0 / (SELECT COUNT(*) FROM patents) as ai_percent
+                        COUNT(DISTINCT p.{patent_id_col}) * 100.0 / NULLIF((SELECT COUNT(*) FROM patents), 0) as ai_percent
                     FROM patents p
-                    JOIN cpc c ON p.patent_id = c.patent_id
-                    WHERE c.cpc_class LIKE 'G06N%'
-                """).fetchone()[0]
-                ai_share = round(ai_share, 1)
+                    JOIN cpc c ON p.{patent_id_col} = c.{patent_id_col}
+                    WHERE c.{cpc_code_col} LIKE 'G06N%%'
+                """).fetchone()
+                
+                if ai_result and ai_result[0] is not None:
+                    ai_share = round(ai_result[0], 1)
+                else:
+                    ai_share = 0
+                print(f"✅ AI-доля: {ai_share}%")
             except Exception as e:
                 print(f"⚠️ Не удалось рассчитать AI-долю: {e}")
 
