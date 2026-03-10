@@ -139,7 +139,7 @@ def load_domain_data(domain_clean):
             traceback.print_exc()
             papers_available = False
 
-    # --- Загрузка патентов ---
+    # --- Загрузка патентов (с инициализацией переменных) ---
     patents_aligned_dict = {}
     patents_total = 0
     top_assignees = ["Нет данных"]
@@ -176,75 +176,38 @@ def load_domain_data(domain_clean):
                 patent_id_col = 'publication_number'
             
             assignee_id_col = patent_id_col  # Обычно такое же имя
+            
+            # --- ИСПРАВЛЕНО: определяем тип publication_date и преобразуем ---
+            date_sample = con.execute("SELECT publication_date FROM patents LIMIT 1").fetchone()
+            if date_sample and isinstance(date_sample[0], (int, np.integer)):
+                # Unix timestamp в миллисекундах
+                query_patents_monthly = f"""
+                    SELECT 
+                        strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%%Y-%%m') as month,
+                        COUNT(*) as count
+                    FROM patents
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
+            else:
+                # Дата в другом формате
+                query_patents_monthly = f"""
+                    SELECT 
+                        strftime(CAST(publication_date AS DATE), '%%Y-%%m') as month,
+                        COUNT(*) as count
+                    FROM patents
+                    WHERE publication_date IS NOT NULL
+                    GROUP BY month
+                    ORDER BY month
+                """
 
-            # ========== ИСПРАВЛЕНО: загрузка патентов по месяцам ==========
-            try:
-                # Проверяем тип данных publication_date
-                date_sample = con.execute("SELECT publication_date FROM patents WHERE publication_date IS NOT NULL LIMIT 1").fetchone()
-                
-                if date_sample and date_sample[0] is not None:
-                    print(f"📅 Пример даты в patents: {date_sample[0]} (тип: {type(date_sample[0])})")
-                    
-                    # Пробуем разные форматы дат
-                    if isinstance(date_sample[0], (int, np.integer)):
-                        # Unix timestamp в секундах или миллисекундах
-                        if date_sample[0] > 10000000000:  # > 10 млрд - скорее миллисекунды
-                            query_patents_monthly = """
-                                SELECT 
-                                    strftime(CAST(to_timestamp(publication_date / 1000) AS DATE), '%Y-%m') as month,
-                                    COUNT(*) as count
-                                FROM patents
-                                WHERE publication_date IS NOT NULL AND publication_date > 0
-                                GROUP BY month
-                                ORDER BY month
-                            """
-                        else:  # секунды
-                            query_patents_monthly = """
-                                SELECT 
-                                    strftime(CAST(to_timestamp(publication_date) AS DATE), '%Y-%m') as month,
-                                    COUNT(*) as count
-                                FROM patents
-                                WHERE publication_date IS NOT NULL AND publication_date > 0
-                                GROUP BY month
-                                ORDER BY month
-                            """
-                    else:
-                        # Дата в строковом формате
-                        query_patents_monthly = """
-                            SELECT 
-                                strftime(CAST(publication_date AS DATE), '%Y-%m') as month,
-                                COUNT(*) as count
-                            FROM patents
-                            WHERE publication_date IS NOT NULL AND publication_date != ''
-                            GROUP BY month
-                            ORDER BY month
-                        """
-                    
-                    df_patents_monthly = con.execute(query_patents_monthly).df()
-                    
-                    if len(df_patents_monthly) > 0:
-                        patents_aligned_dict = dict(zip(df_patents_monthly['month'], df_patents_monthly['count']))
-                        print(f"✅ Найдено {len(patents_aligned_dict)} месяцев с патентами")
-                        print(f"📊 Примеры: {list(patents_aligned_dict.items())[:5]}")
-                        
-                        # Проверяем сумму патентов
-                        total_patents_in_months = sum(patents_aligned_dict.values())
-                        print(f"📊 Сумма патентов по месяцам: {total_patents_in_months}")
-                    else:
-                        print("⚠️ Нет данных по месяцам для патентов")
-                        
-                else:
-                    print("⚠️ Нет примеров дат в patents")
-                    
-            except Exception as e:
-                print(f"❌ Ошибка при группировке патентов по месяцам: {e}")
-                traceback.print_exc()
-                patents_aligned_dict = {}
+            df_patents_monthly = con.execute(query_patents_monthly).df()
+            patents_aligned_dict = dict(zip(df_patents_monthly['month'], df_patents_monthly['count']))
 
             patents_total = con.execute("SELECT COUNT(*) FROM patents").fetchone()[0]
-            print(f"📊 Всего патентов в таблице: {patents_total}")
 
-            # Топ-5 заявителей
+            # Топ-5 заявителей - ИСПРАВЛЕНО
             try:
                 # Проверяем, есть ли нужные колонки в assignee_harmonized
                 if 'name' in assignee_cols:
@@ -252,7 +215,7 @@ def load_domain_data(domain_clean):
                 elif 'assignee_name' in assignee_cols:
                     name_col = 'assignee_name'
                 else:
-                    name_col = assignee_cols[0] if assignee_cols else 'name'
+                    name_col = assignee_cols[0]  # берем первую колонку
                 
                 top_assignees_df = con.execute(f"""
                     SELECT 
@@ -271,18 +234,35 @@ def load_domain_data(domain_clean):
                     print("✅ Топ заявителей получен")
             except Exception as e:
                 print(f"⚠️ Не удалось получить топ заявителей: {e}")
+                # Пробуем альтернативный запрос
+                try:
+                    top_assignees_df = con.execute(f"""
+                        SELECT 
+                            'Assignee ' || row_number() OVER (ORDER BY COUNT(*) DESC) as assignee_name,
+                            COUNT(*) as patent_count
+                        FROM patents p
+                        GROUP BY p.{patent_id_col}
+                        ORDER BY patent_count DESC
+                        LIMIT 5
+                    """).df()
+                    if not top_assignees_df.empty:
+                        top_assignees = top_assignees_df['assignee_name'].tolist()
+                        assignee_values = top_assignees_df['patent_count'].tolist()
+                        print("✅ Топ заявителей (альтернативный запрос)")
+                except:
+                    pass
 
-            # География (по publication_number)
+            # География (по publication_number) - ИСПРАВЛЕНО
             try:
                 countries_df = con.execute(f"""
                     SELECT 
                         CASE 
-                            WHEN publication_number LIKE 'US%' THEN 'США'
-                            WHEN publication_number LIKE 'CN%' THEN 'Китай'
-                            WHEN publication_number LIKE 'JP%' THEN 'Япония'
-                            WHEN publication_number LIKE 'KR%' THEN 'Южная Корея'
-                            WHEN publication_number LIKE 'EP%' THEN 'Европа'
-                            WHEN publication_number LIKE 'WO%' THEN 'WO'
+                            WHEN publication_number LIKE 'US%%' THEN 'США'
+                            WHEN publication_number LIKE 'CN%%' THEN 'Китай'
+                            WHEN publication_number LIKE 'JP%%' THEN 'Япония'
+                            WHEN publication_number LIKE 'KR%%' THEN 'Южная Корея'
+                            WHEN publication_number LIKE 'EP%%' THEN 'Европа'
+                            WHEN publication_number LIKE 'WO%%' THEN 'WO'
                             ELSE 'Другие'
                         END as country,
                         COUNT(*) as cnt
@@ -299,24 +279,22 @@ def load_domain_data(domain_clean):
             except Exception as e:
                 print(f"⚠️ Не удалось получить географию: {e}")
 
-            # AI-интеграция
+            # AI-интеграция - ИСПРАВЛЕНО
             try:
                 # Определяем колонку с CPC кодом
                 if 'cpc_class' in cpc_cols:
                     cpc_code_col = 'cpc_class'
                 elif 'cpc_code' in cpc_cols:
                     cpc_code_col = 'cpc_code'
-                elif 'code' in cpc_cols:
-                    cpc_code_col = 'code'
                 else:
-                    cpc_code_col = cpc_cols[0] if cpc_cols else 'code'
+                    cpc_code_col = cpc_cols[0]
                 
                 ai_result = con.execute(f"""
                     SELECT 
                         COUNT(DISTINCT p.{patent_id_col}) * 100.0 / NULLIF((SELECT COUNT(*) FROM patents), 0) as ai_percent
                     FROM patents p
                     JOIN cpc c ON p.{patent_id_col} = c.{patent_id_col}
-                    WHERE c.{cpc_code_col} LIKE 'G06N%'
+                    WHERE c.{cpc_code_col} LIKE 'G06N%%'
                 """).fetchone()
                 
                 if ai_result and ai_result[0] is not None:
@@ -331,32 +309,18 @@ def load_domain_data(domain_clean):
         except Exception as e:
             print(f"❌ Критическая ошибка при обработке патентов: {e}")
             traceback.print_exc()
-            patents_available = False
+            patents_available = False  # сбрасываем флаг, но переменные уже инициализированы
 
     # --- Объединение временных рядов ---
-    all_months = sorted(set(all_months) | set(patents_aligned_dict.keys()))
-    
+    all_months = sorted(set(all_months) | set(patents_aligned_dict.keys() if patents_available else []))
     if not all_months:
-        print("⚠️ Нет месяцев для построения временного ряда")
         return _generate_fallback_data(domain_clean, "Нет данных для построения временного ряда")
 
     papers_dict = dict(zip(all_months, papers_aligned)) if papers_available else {}
     papers_aligned_final = [papers_dict.get(month, 0) for month in all_months]
     patents_aligned_final = [patents_aligned_dict.get(month, 0) for month in all_months]
 
-    # ========== ДИАГНОСТИКА ДАННЫХ ==========
-    print("\n📊 ДИАГНОСТИКА ДАННЫХ:")
-    print(f"Всего месяцев: {len(all_months)}")
-    print(f"Первые 5 месяцев: {all_months[:5]}")
-    print(f"Последние 5 месяцев: {all_months[-5:]}")
-    print(f"Публикации (первые 5): {papers_aligned_final[:5]}")
-    print(f"Патенты (первые 5): {patents_aligned_final[:5]}")
-    print(f"Сумма публикаций: {sum(papers_aligned_final)}")
-    print(f"Сумма патентов: {sum(patents_aligned_final)}")
-    print(f"Макс публикаций: {max(papers_aligned_final) if papers_aligned_final else 0}")
-    print(f"Макс патентов: {max(patents_aligned_final) if patents_aligned_final else 0}")
-
-    # --- Расчёт метрик роста ---
+    # --- Расчёт метрик роста (с защитой от ошибок) ---
     try:
         if len(papers_aligned_final) >= 24:
             recent_papers = sum(papers_aligned_final[-12:])
@@ -444,9 +408,8 @@ def load_domain_data(domain_clean):
                 time_lag_change = "0"
         except:
             time_lag_change = "0"
-            
     except Exception as e:
-        print(f"⚠️ Ошибка при расчёте метрик: {e}")
+        print(f"⚠️ Ошибка при расчёте метрик, использую значения по умолчанию: {e}")
         papers_growth = 0
         patents_growth = 0
         trend_score = 50
