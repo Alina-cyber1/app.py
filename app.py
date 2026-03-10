@@ -7,6 +7,10 @@ import numpy as np
 import io
 import matplotlib.pyplot as plt
 import os
+import traceback
+import time
+import psutil
+
 print("🚀 app.py начал выполняться")
 # Импортируем наш загрузчик данных
 from data_loader import load_domain_data
@@ -327,25 +331,47 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 📊 Статус системы")
-    # Загружаем данные
-    dates, papers, patents, metrics = load_domain_data(domain_clean)
+    
+    # Загружаем данные с обработкой ошибок
+    try:
+        load_start = time.time()
+        dates, papers, patents, metrics = load_domain_data(domain_clean)
+        load_time = time.time() - load_start
+        data_available = len(dates) > 0
+    except Exception as e:
+        st.error(f"❌ Ошибка загрузки данных: {e}")
+        with st.expander("🔍 Детали ошибки"):
+            st.code(traceback.format_exc())
+        st.stop()
 
-    # Проверяем, есть ли данные (dates не пуст)
-    data_available = len(dates) > 0
+    # Применяем фильтры по годам
+    start_year, end_year = year_range
+    mask_years = [int(d[:4]) >= start_year and int(d[:4]) <= end_year for d in dates]
+    dates_filtered = np.array(dates)[mask_years]
+    papers_filtered = np.array(papers)[mask_years]
+    patents_filtered = np.array(patents)[mask_years]
+
+    # Метрики производительности
+    process = psutil.Process()
+    memory_usage = process.memory_info().rss / 1024 / 1024
 
     status_col1, status_col2 = st.columns(2)
     with status_col1:
         st.markdown("🟢 OpenAlex")
         st.markdown("🟡 BigQuery")
+        st.markdown(f"⏱ Загрузка: {load_time:.1f} сек")
     with status_col2:
         if data_available:
             papers_total = metrics.get('papers_total', 0)
             patents_total = metrics.get('patents_total', 0)
             st.markdown(f"✅ {papers_total} статей")
             st.markdown(f"⏳ {patents_total} патентов")
+            st.markdown(f"💾 Память: {memory_usage:.0f} МБ")
         else:
             st.markdown("❌ Нет данных")
             st.markdown("❌ Нет данных")
+            st.markdown("❌")
+    
     st.progress(0.8 if data_available else 0.2, text="Готовность MVP")
 
     # Если данных нет – показываем предупреждение и останавливаем выполнение
@@ -400,84 +426,87 @@ with col4:
 tab1, tab2, tab3, tab4 = st.tabs(["📈 Тренды", "🔬 Подтехнологии", "📊 Данные", "📄 Отчеты"])
 
 with tab1:
-    st.markdown(f"## 📊 Динамика развития: {domain_clean}")
+    if len(dates_filtered) == 0:
+        st.warning("⚠️ Нет данных за выбранный период")
+    else:
+        st.markdown(f"## 📊 Динамика развития: {domain_clean}")
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=dates, y=papers,
-        name='📄 Научные публикации',
-        line=dict(color='#00CC96', width=4),
-        fill='tozeroy',
-        fillcolor='rgba(0,204,150,0.1)'
-    ))
-    fig.add_trace(go.Scatter(
-        x=dates, y=patents,
-        name='📃 Патенты',
-        line=dict(color='#FF4B4B', width=4),
-        fill='tozeroy',
-        fillcolor='rgba(255,75,75,0.1)',
-        yaxis='y2'
-    ))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=dates_filtered, y=papers_filtered,
+            name='📄 Научные публикации',
+            line=dict(color='#00CC96', width=4),
+            fill='tozeroy',
+            fillcolor='rgba(0,204,150,0.1)'
+        ))
+        fig.add_trace(go.Scatter(
+            x=dates_filtered, y=patents_filtered,
+            name='📃 Патенты',
+            line=dict(color='#FF4B4B', width=4),
+            fill='tozeroy',
+            fillcolor='rgba(255,75,75,0.1)',
+            yaxis='y2'
+        ))
 
-    fig.update_layout(
-        title=f"{domain_clean}: Наука vs Технологии",
-        xaxis_title="Год",
-        yaxis_title="Количество публикаций",
-        yaxis2=dict(
-            title="Количество патентов",
-            overlaying='y',
-            side='right'
-        ),
-        hovermode='x unified',
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        height=500,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### 🏭 Топ заявителей")
-        top_assignees = metrics.get('top_assignees', ['Нет данных'])
-        assignee_values = metrics.get('assignee_values', [0])
-        top_df = pd.DataFrame({
-            'Компания': top_assignees,
-            'Патенты': assignee_values
-        })
-        fig2 = px.bar(
-            top_df, x='Компания', y='Патенты',
-            color='Патенты',
-            color_continuous_scale='Viridis'
-        )
-        fig2.update_layout(
+        fig.update_layout(
+            title=f"{domain_clean}: Наука vs Технологии",
+            xaxis_title="Год",
+            yaxis_title="Количество публикаций",
+            yaxis2=dict(
+                title="Количество патентов",
+                overlaying='y',
+                side='right'
+            ),
+            hovermode='x unified',
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False
+            height=500,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
-        st.markdown("### 🌍 География")
-        countries = metrics.get('countries', ['Нет данных'])
-        country_values = metrics.get('country_values', [100])
-        geo_df = pd.DataFrame({
-            'Страна': countries,
-            'Доля': country_values
-        })
-        fig3 = px.pie(
-            geo_df, values='Доля', names='Страна',
-            color_discrete_sequence=px.colors.sequential.Viridis
-        )
-        fig3.update_traces(textposition='inside', textinfo='percent+label')
-        fig3.update_layout(showlegend=False)
-        st.plotly_chart(fig3, use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### 🏭 Топ заявителей")
+            top_assignees = metrics.get('top_assignees', ['Нет данных'])
+            assignee_values = metrics.get('assignee_values', [0])
+            top_df = pd.DataFrame({
+                'Компания': top_assignees,
+                'Патенты': assignee_values
+            })
+            fig2 = px.bar(
+                top_df, x='Компания', y='Патенты',
+                color='Патенты',
+                color_continuous_scale='Viridis'
+            )
+            fig2.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                showlegend=False
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with col2:
+            st.markdown("### 🌍 География")
+            countries = metrics.get('countries', ['Нет данных'])
+            country_values = metrics.get('country_values', [100])
+            geo_df = pd.DataFrame({
+                'Страна': countries,
+                'Доля': country_values
+            })
+            fig3 = px.pie(
+                geo_df, values='Доля', names='Страна',
+                color_discrete_sequence=px.colors.sequential.Viridis
+            )
+            fig3.update_traces(textposition='inside', textinfo='percent+label')
+            fig3.update_layout(showlegend=False)
+            st.plotly_chart(fig3, use_container_width=True)
 
 with tab2:
     st.markdown(f"## 🔬 Подтехнологии в {domain_clean}")
@@ -527,7 +556,8 @@ with tab3:
     # Загружаем DataFrame для показа примеров
     domain_map = {'Полупроводники': 'semiconductors', 'Генная инженерия': 'gene_engineering'}
     domain_key = domain_map.get(domain_clean, domain_clean.lower())
-    file_path = os.path.join('data', 'processed', f"{domain_key}_clean.parquet")
+    # ИСПРАВЛЕНО: правильное имя файла
+    file_path = os.path.join('data', 'processed', f"{domain_key}_clean_full.parquet")
     
     try:
         if os.path.exists(file_path):
@@ -709,9 +739,9 @@ with tab4:
                 st.error("❌ Невозможно сгенерировать PDF: библиотеки не установлены")
     with col2:
         timeline_data = pd.DataFrame({
-            'Дата': dates,
-            'Публикации': papers.astype(int) if len(papers) > 0 else [],
-            'Патенты': patents.astype(int) if len(patents) > 0 else []
+            'Дата': dates_filtered if len(dates_filtered) > 0 else [],
+            'Публикации': papers_filtered.astype(int) if len(papers_filtered) > 0 else [],
+            'Патенты': patents_filtered.astype(int) if len(patents_filtered) > 0 else []
         })
         if len(timeline_data) > 0:
             csv = timeline_data.to_csv(index=False).encode('utf-8')
