@@ -2,355 +2,287 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from pathlib import Path
 import gdown
-import os
 import time
-from datetime import datetime
 
-# Конфигурация страницы - ДОЛЖНА БЫТЬ ПЕРВОЙ командой Streamlit
+# ДОЛЖНА быть первой командой Streamlit
 st.set_page_config(
-    page_title="Patent Analysis Dashboard",
+    page_title="Patent Analysis",
     page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
+# Заголовок
+st.title("📊 Patent Analysis Dashboard")
+st.markdown("---")
+
 # Создаем директорию для данных
-DATA_DIR = Path("/mount/src/app.py/data/processed")
+DATA_DIR = Path("data/processed")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Словарь с файлами данных (ID файлов из Google Drive)
-# Используем прямые ID вместо secrets для надежности
-FILE_IDS = {
-    "gene_full": "1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
-    "gene_nlp": "1DiRskqNZ3ph04f3QsyI-RjMxuVPKehaq",
-    "gene_signal": "1-VO0v49BFRIpvJl2ix0WzVnRjP1hxNRh",
-    "semi_full": "1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
-    "semi_nlp": "1Qq3X1O7hpIV51xcet_TlTinqJ8SniIyN",
-    "semi_signal": "1GSmeQvnoGU75rEI4v8QqITLj7KRrDQOQ",
-    "patents": "1xI60lbOCbY7BQ_Wq9tX-cs6Zzvme8B9L",
-    "cpc": "1L98w0Cx7Dh308W70W080dVabzN_34Kwk",
-    "assignee": "1CBRr7564K7hGdd75ffE8IRIvjesolqkd",
-    "title": "1BfEZRKC7qqWGna9uiqjdxzvhDRke8ZzN"
+# Прямые ссылки на файлы (рабочие)
+FILES = {
+    "gene_full": {
+        "name": "gene_engineering_clean_full.parquet",
+        "url": "https://drive.google.com/uc?id=1mLx-mh1k4M4zNAOATLQiFXy06s0tfZHl",
+        "display": "🧬 Генная инженерия (полные)"
+    },
+    "gene_nlp": {
+        "name": "gene_engineering_clean_nlp.parquet",
+        "url": "https://drive.google.com/uc?id=1DiRskqNZ3ph04f3QsyI-RjMxuVPKehaq",
+        "display": "🧬 Генная инженерия (NLP)"
+    },
+    "gene_signal": {
+        "name": "gene_engineering_clean_signal.parquet",
+        "url": "https://drive.google.com/uc?id=1-VO0v49BFRIpvJl2ix0WzVnRjP1hxNRh",
+        "display": "🧬 Генная инженерия (сигналы)"
+    },
+    "semi_full": {
+        "name": "semiconductors_clean_full.parquet",
+        "url": "https://drive.google.com/uc?id=1CwfeO6WY7gKqov5mAtaD1ffvsxBzdjR5",
+        "display": "💻 Полупроводники (полные)"
+    },
+    "semi_nlp": {
+        "name": "semiconductors_clean_nlp.parquet",
+        "url": "https://drive.google.com/uc?id=1Qq3X1O7hpIV51xcet_TlTinqJ8SniIyN",
+        "display": "💻 Полупроводники (NLP)"
+    },
+    "semi_signal": {
+        "name": "semiconductors_clean_signal.parquet",
+        "url": "https://drive.google.com/uc?id=1GSmeQvnoGU75rEI4v8QqITLj7KRrDQOQ",
+        "display": "💻 Полупроводники (сигналы)"
+    }
 }
 
-FILE_NAMES = {
-    "gene_full": "gene_engineering_clean_full.parquet",
-    "gene_nlp": "gene_engineering_clean_nlp.parquet",
-    "gene_signal": "gene_engineering_clean_signal.parquet",
-    "semi_full": "semiconductors_clean_full.parquet",
-    "semi_nlp": "semiconductors_clean_nlp.parquet",
-    "semi_signal": "semiconductors_clean_signal.parquet",
-    "patents": "patents.parquet",
-    "cpc": "cpc.parquet",
-    "assignee": "assignee_harmonized.parquet",
-    "title": "title_localized.parquet"
-}
-
-def get_file_url(file_key):
-    """Формирует URL для скачивания с Google Drive"""
-    file_id = FILE_IDS[file_key]
-    return f"https://drive.google.com/uc?id={file_id}"
-
-@st.cache_resource(ttl=3600, show_spinner=False)
-def check_file_exists(file_key):
-    """Проверяет существование файла (кэшируется)"""
-    filepath = DATA_DIR / FILE_NAMES[file_key]
+# Функция для проверки существования файла
+def file_exists(file_key):
+    filepath = DATA_DIR / FILES[file_key]["name"]
     return filepath.exists()
 
-@st.cache_resource(ttl=3600, show_spinner=False)
+# Функция для получения размера файла
 def get_file_size(file_key):
-    """Возвращает размер файла если он существует"""
-    filepath = DATA_DIR / FILE_NAMES[file_key]
+    filepath = DATA_DIR / FILES[file_key]["name"]
     if filepath.exists():
-        return filepath.stat().st_size / (1024 * 1024)  # в MB
+        return round(filepath.stat().st_size / (1024 * 1024), 1)
     return 0
 
+# Функция для скачивания файла
 def download_file(file_key):
-    """
-    Скачивает файл с прогресс-баром
-    """
-    filepath = DATA_DIR / FILE_NAMES[file_key]
+    file_info = FILES[file_key]
+    filepath = DATA_DIR / file_info["name"]
     
-    # Создаем прогресс-бар в streamlit
-    progress_text = f"📥 Скачиваю {FILE_NAMES[file_key]}..."
-    my_bar = st.progress(0, text=progress_text)
+    # Прогресс бар
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
     try:
-        # Функция для обновления прогресса
-        def progress_callback(current, total):
-            if total > 0:
-                progress = int(current / total * 100)
-                my_bar.progress(progress / 100, text=progress_text)
-        
-        # Скачиваем файл
-        url = get_file_url(file_key)
-        gdown.download(url, str(filepath), quiet=True, resume=True)
-        
-        my_bar.progress(1.0, text=f"✅ Скачан {FILE_NAMES[file_key]}")
-        time.sleep(0.5)
-        my_bar.empty()
-        
+        status_text.text(f"📥 Скачиваю {file_info['name']}...")
+        gdown.download(file_info["url"], str(filepath), quiet=False)
+        progress_bar.progress(100)
+        status_text.text(f"✅ Скачано: {file_info['name']}")
+        time.sleep(1)
+        progress_bar.empty()
+        status_text.empty()
         return True
     except Exception as e:
-        my_bar.empty()
-        st.error(f"Ошибка скачивания {FILE_NAMES[file_key]}: {e}")
+        st.error(f"Ошибка: {e}")
+        progress_bar.empty()
+        status_text.empty()
         return False
 
-@st.cache_data(ttl=1800, show_spinner="Загрузка данных...")
-def load_data(file_key, nrows=None):
-    """
-    Загружает данные из parquet файла
-    """
-    filepath = DATA_DIR / FILE_NAMES[file_key]
+# Функция для загрузки данных
+@st.cache_data(ttl=3600)
+def load_data(file_key, n_rows=5000):
+    filepath = DATA_DIR / FILES[file_key]["name"]
     
-    # Если файла нет - скачиваем
     if not filepath.exists():
-        with st.spinner(f"Скачиваю {FILE_NAMES[file_key]}..."):
-            success = download_file(file_key)
-            if not success:
-                return None
+        return None
     
     try:
-        # Загружаем данные
-        if nrows:
-            df = pd.read_parquet(filepath)
-            df = df.head(nrows)
-        else:
-            df = pd.read_parquet(filepath)
-        
+        df = pd.read_parquet(filepath)
+        if n_rows and len(df) > n_rows:
+            df = df.head(n_rows)
         return df
     except Exception as e:
-        st.error(f"Ошибка загрузки {file_key}: {e}")
+        st.error(f"Ошибка загрузки: {e}")
         return None
 
-def load_domain_data(domain, sample_size=5000):
-    """
-    Загружает данные для домена с ограничением размера
-    """
-    data = {}
+# Боковая панель
+with st.sidebar:
+    st.header("⚙️ Настройки")
     
-    # Определяем ключи для домена
-    if domain == "Генная инженерия":
-        keys = ["gene_full", "gene_nlp", "gene_signal"]
-        display_names = ["Полные данные", "NLP данные", "Сигнальные данные"]
-    else:  # Полупроводники
-        keys = ["semi_full", "semi_nlp", "semi_signal"]
-        display_names = ["Полные данные", "NLP данные", "Сигнальные данные"]
+    # Выбор домена
+    domain = st.radio(
+        "Выберите домен",
+        ["Генная инженерия", "Полупроводники"]
+    )
     
-    # Загружаем данные
-    for key, display_name in zip(keys, display_names):
-        with st.spinner(f"Загрузка {display_name}..."):
-            df = load_data(key, nrows=sample_size)
-            if df is not None:
-                data[display_name] = df
-                st.success(f"✅ {display_name} загружены ({len(df)} записей)")
+    # Размер выборки
+    sample_size = st.slider(
+        "Количество строк",
+        min_value=1000,
+        max_value=10000,
+        value=5000,
+        step=1000
+    )
     
-    return data
-
-def main():
-    # Заголовок
-    st.title("📊 Patent Analysis Dashboard")
     st.markdown("---")
     
-    # Боковая панель
-    with st.sidebar:
-        st.header("⚙️ Настройки")
-        
-        # Выбор домена
-        domain = st.radio(
-            "Выберите домен",
-            ["Генная инженерия", "Полупроводники"],
-            index=0,
-            key="domain_selector"
-        )
-        
-        st.markdown("---")
-        
-        # Размер выборки
-        sample_size = st.slider(
-            "Размер выборки (строк)",
-            min_value=1000,
-            max_value=20000,
-            value=5000,
-            step=1000,
-            help="Меньший размер = быстрее загрузка"
-        )
-        
-        st.markdown("---")
-        
-        # Информация о кэше
-        if st.button("🔄 Очистить кэш"):
-            st.cache_data.clear()
-            st.cache_resource.clear()
-            st.success("✅ Кэш очищен!")
-            st.rerun()
-        
-        # Статус файлов
-        with st.expander("📁 Статус файлов"):
-            for key, name in FILE_NAMES.items():
-                if key.startswith("gene_") and domain != "Генная инженерия":
-                    continue
-                if key.startswith("semi_") and domain != "Полупроводники":
-                    continue
-                
-                exists = check_file_exists(key)
-                size = get_file_size(key)
-                
-                if exists:
-                    st.success(f"✅ {name} ({size:.1f} MB)")
-                else:
-                    st.warning(f"⏳ {name} (не скачан)")
+    # Статус файлов
+    st.subheader("📁 Статус файлов")
     
-    # Основной контент
-    st.header(f"📈 Анализ домена: {domain}")
+    if domain == "Генная инженерия":
+        keys = ["gene_full", "gene_nlp", "gene_signal"]
+    else:
+        keys = ["semi_full", "semi_nlp", "semi_signal"]
     
-    # Кнопка загрузки данных
-    if st.button("🚀 Загрузить данные", type="primary"):
-        # Загружаем данные
-        data = load_domain_data(domain, sample_size)
-        
-        if data:
-            # Сохраняем в session state
-            st.session_state['data'] = data
-            st.session_state['domain'] = domain
-            st.success("✅ Данные успешно загружены!")
+    for key in keys:
+        exists = file_exists(key)
+        size = get_file_size(key)
+        if exists:
+            st.success(f"✅ {FILES[key]['display']} ({size} MB)")
+        else:
+            st.warning(f"⏳ {FILES[key]['display']} (не скачан)")
     
-    # Если данные уже загружены
-    if 'data' in st.session_state and st.session_state['domain'] == domain:
-        data = st.session_state['data']
+    st.markdown("---")
+    
+    # Кнопка очистки кэша
+    if st.button("🔄 Очистить кэш"):
+        st.cache_data.clear()
+        st.success("Кэш очищен!")
+        st.rerun()
+
+# Основная область
+st.header(f"📈 Домен: {domain}")
+
+# Кнопка загрузки
+if st.button("🚀 Загрузить данные", type="primary", use_container_width=True):
+    
+    # Определяем какие файлы нужно скачать
+    if domain == "Генная инженерия":
+        files_to_download = ["gene_full", "gene_nlp", "gene_signal"]
+    else:
+        files_to_download = ["semi_full", "semi_nlp", "semi_signal"]
+    
+    # Скачиваем файлы, которых нет
+    for key in files_to_download:
+        if not file_exists(key):
+            success = download_file(key)
+            if not success:
+                st.stop()
+    
+    st.success("✅ Все данные загружены!")
+    
+    # Загружаем данные
+    data = {}
+    for key in files_to_download:
+        with st.spinner(f"Загрузка {FILES[key]['display']}..."):
+            df = load_data(key, sample_size)
+            if df is not None:
+                data[FILES[key]['display']] = df
+    
+    # Сохраняем в session state
+    st.session_state['data'] = data
+    st.session_state['domain'] = domain
+    st.rerun()
+
+# Если данные уже загружены
+if 'data' in st.session_state and st.session_state['domain'] == domain:
+    data = st.session_state['data']
+    
+    # Создаем вкладки
+    tab1, tab2, tab3 = st.tabs(["📊 Обзор", "📈 Графики", "🔍 Данные"])
+    
+    with tab1:
+        st.subheader("Общая информация")
         
-        # Создаем вкладки
-        tabs = st.tabs(["📊 Обзор", "📈 Визуализация", "🔍 Данные"])
+        # Метрики
+        cols = st.columns(3)
+        total_rows = sum(len(df) for df in data.values())
         
-        # Вкладка 1: Обзор
-        with tabs[0]:
-            st.subheader("Общая статистика")
-            
-            # Метрики
-            col1, col2, col3 = st.columns(3)
-            
-            total_rows = sum(len(df) for df in data.values())
-            
-            with col1:
-                st.metric("Всего записей", f"{total_rows:,}")
-            
-            with col2:
-                st.metric("Типов данных", len(data))
-            
-            with col3:
-                st.metric("Домен", domain)
-            
-            # Краткая информация о каждом датасете
-            for name, df in data.items():
-                with st.expander(f"📊 {name}"):
-                    st.write(f"**Строк:** {len(df):,}")
-                    st.write(f"**Колонок:** {len(df.columns)}")
-                    st.write("**Типы данных:**")
-                    st.write(df.dtypes.value_counts())
+        cols[0].metric("Всего записей", f"{total_rows:,}")
+        cols[1].metric("Типов данных", len(data))
+        cols[2].metric("Домен", domain)
         
-        # Вкладка 2: Визуализация
-        with tabs[1]:
-            st.subheader("Визуализация данных")
+        # Информация по каждому датасету
+        for name, df in data.items():
+            with st.expander(f"📊 {name}"):
+                st.write(f"**Строк:** {len(df):,}")
+                st.write(f"**Колонок:** {len(df.columns)}")
+                st.write("**Первые 5 строк:**")
+                st.dataframe(df.head())
+    
+    with tab2:
+        st.subheader("Визуализация")
+        
+        # Выбор датасета
+        selected = st.selectbox("Выберите данные", list(data.keys()))
+        df = data[selected]
+        
+        # Числовые колонки
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if numeric_cols:
+            # Выбор колонки
+            col = st.selectbox("Выберите колонку", numeric_cols)
             
-            # Выбор датасета
-            selected_dataset = st.selectbox(
-                "Выберите датасет",
-                list(data.keys())
+            # Гистограмма
+            fig = px.histogram(
+                df, 
+                x=col,
+                title=f"Распределение {col}",
+                nbins=50
             )
-            
-            df = data[selected_dataset]
-            
-            # Выбор типа визуализации
-            viz_type = st.radio(
-                "Тип визуализации",
-                ["Распределение", "Временной ряд", "Корреляция"],
-                horizontal=True
-            )
-            
-            if viz_type == "Распределение":
-                # Выбор колонки
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                if numeric_cols:
-                    col = st.selectbox("Выберите колонку", numeric_cols)
-                    fig = px.histogram(df, x=col, title=f"Распределение {col}")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Нет числовых колонок для визуализации")
-            
-            elif viz_type == "Временной ряд":
-                # Поиск колонок с датами
-                date_cols = [col for col in df.columns if 'date' in col.lower() or 'year' in col.lower()]
-                if date_cols:
-                    col = st.selectbox("Выберите колонку с датой", date_cols)
-                    if col in df.columns:
-                        if 'date' in col.lower():
-                            df[col] = pd.to_datetime(df[col], errors='coerce')
-                            timeline = df[col].dt.year.value_counts().sort_index()
-                        else:
-                            timeline = df[col].value_counts().sort_index()
-                        
-                        fig = px.line(
-                            x=timeline.index, 
-                            y=timeline.values,
-                            title=f"Тренд по {col}"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Не найдены колонки с датами")
-            
-            elif viz_type == "Корреляция":
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                if len(numeric_cols) > 1:
-                    corr = df[numeric_cols].corr()
-                    fig = px.imshow(
-                        corr,
-                        title="Корреляционная матрица",
-                        color_continuous_scale='RdBu_r'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Нужно минимум 2 числовые колонки для корреляции")
-        
-        # Вкладка 3: Данные
-        with tabs[2]:
-            st.subheader("Просмотр данных")
-            
-            # Выбор датасета
-            selected_dataset = st.selectbox(
-                "Выберите датасет для просмотра",
-                list(data.keys()),
-                key="data_viewer"
-            )
-            
-            df = data[selected_dataset]
-            
-            # Показываем данные
-            st.dataframe(df.head(100))
+            st.plotly_chart(fig, use_container_width=True)
             
             # Статистика
-            with st.expander("Статистика"):
-                st.write(df.describe())
+            st.write("**Статистика:**")
+            st.write(df[col].describe())
+        else:
+            st.info("Нет числовых данных для визуализации")
     
-    else:
-        # Если данные не загружены
-        st.info("👆 Нажмите кнопку 'Загрузить данные' для начала работы")
+    with tab3:
+        st.subheader("Просмотр данных")
         
-        # Превью доступных данных
-        with st.expander("📋 Доступные данные"):
-            st.markdown("""
-            **Генная инженерия:**
-            - Полные данные патентов
-            - NLP-обработанные тексты
-            - Сигнальные данные и метрики
-            
-            **Полупроводники:**
-            - Полные данные патентов
-            - NLP-обработанные тексты
-            - Сигнальные данные и метрики
-            """)
+        # Выбор датасета
+        selected = st.selectbox("Выберите данные", list(data.keys()), key="viewer")
+        df = data[selected]
+        
+        # Показываем данные
+        st.dataframe(df, use_container_width=True)
+        
+        # Информация о колонках
+        with st.expander("📋 Информация о колонках"):
+            col_info = pd.DataFrame({
+                'Колонка': df.columns,
+                'Тип': df.dtypes.values,
+                'Непустых': df.count().values,
+                'Уникальных': [df[col].nunique() for col in df.columns]
+            })
+            st.dataframe(col_info)
 
-if __name__ == "__main__":
-    main()
+else:
+    # Приветственный экран
+    st.info("👆 Нажмите кнопку 'Загрузить данные' чтобы начать работу")
+    
+    with st.expander("ℹ️ О датасетах"):
+        st.markdown("""
+        ### Доступные данные:
+        
+        **🧬 Генная инженерия:**
+        - Полные данные патентов
+        - NLP-обработанные тексты
+        - Сигнальные метрики
+        
+        **💻 Полупроводники:**
+        - Полные данные патентов
+        - NLP-обработанные тексты
+        - Сигнальные метрики
+        
+        ### Как это работает:
+        1. Выберите домен
+        2. Настройте количество строк
+        3. Нажмите кнопку загрузки
+        4. Исследуйте данные!
+        """)
