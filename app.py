@@ -21,20 +21,20 @@ st.set_page_config(
 )
 
 # Функция для создания ссылки на скачивание CSV
-def get_csv_download_link(df, filename, text):
+def get_csv_download_link(df, filename):
     csv = df.to_csv(index=False, encoding='utf-8-sig')
     b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">{text}</a>'
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}" style="text-decoration: none; padding: 5px 10px; background-color: #4CAF50; color: white; border-radius: 5px;">📥 Скачать CSV</a>'
     return href
 
 # Функция для создания ссылки на скачивание Excel
-def get_excel_download_link(df, filename, text):
+def get_excel_download_link(df, filename):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        df.to_excel(writer, index=False, sheet_name='Data')
     excel_data = output.getvalue()
     b64 = base64.b64encode(excel_data).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">{text}</a>'
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" style="text-decoration: none; padding: 5px 10px; background-color: #2196F3; color: white; border-radius: 5px;">📥 Скачать Excel</a>'
     return href
 
 # Заголовок
@@ -71,11 +71,17 @@ with st.sidebar:
     
     if gene_file.exists():
         st.success("✅ Генная инженерия: данные есть")
+        # Показываем размер файла
+        size_mb = gene_file.stat().st_size / (1024 * 1024)
+        st.caption(f"Размер: {size_mb:.1f} MB")
     else:
         st.warning("⚠️ Генная инженерия: данных нет")
     
     if semi_file.exists():
         st.success("✅ Полупроводники: данные есть")
+        # Показываем размер файла
+        size_mb = semi_file.stat().st_size / (1024 * 1024)
+        st.caption(f"Размер: {size_mb:.1f} MB")
     else:
         st.warning("⚠️ Полупроводники: данных нет")
     
@@ -112,7 +118,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Информация об источниках данных
-    with st.expander("📊 Об источниках данных", expanded=True):
+    with st.expander("📊 Об источниках данных"):
         source_info = get_data_source_info(domain)
         st.markdown(f"""
         **Текущий источник:** {source_info['status']}
@@ -156,10 +162,10 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
     patents = st.session_state.patents
     metrics = st.session_state.metrics
     
-    # Заголовок с доменом и информацией об источнике
-    source_info = get_data_source_info(domain)
+    # Заголовок с доменом
     st.header(f"📈 Анализ домена: {domain}")
-    st.caption(f"📊 Источник: {source_info['source']} | Обновлено: {source_info['date']}")
+    source_info = get_data_source_info(domain)
+    st.caption(f"📊 Данные предоставлены: {source_info['source']} | Обновлено: {source_info['date']}")
     
     # Метрики в карточках
     col1, col2, col3, col4 = st.columns(4)
@@ -168,20 +174,20 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
         st.metric(
             "📄 Публикации",
             f"{metrics['papers_total']:,}",
-            delta=f"{metrics['papers_growth']}%"
+            delta=f"{metrics['papers_growth']}% за 2 года"
         )
     
     with col2:
         st.metric(
             "📃 Патенты",
             f"{metrics['patents_total']:,}",
-            delta=f"{metrics['patents_growth']}%"
+            delta=f"{metrics['patents_growth']}% за 2 года"
         )
     
     with col3:
         st.metric(
             "📊 Trend Score",
-            f"{metrics['trend_score']}",
+            f"{metrics['trend_score']}/100",
             delta=metrics['trend_status']
         )
     
@@ -238,24 +244,23 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
             'Патенты': patents
         })
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            st.markdown(get_csv_download_link(trend_df, f"{domain}_trends.csv", "📥 Скачать CSV"), unsafe_allow_html=True)
+            st.markdown(get_csv_download_link(trend_df, f"{domain}_trends.csv"), unsafe_allow_html=True)
         with col2:
-            st.markdown(get_excel_download_link(trend_df, f"{domain}_trends.xlsx", "📥 Скачать Excel"), unsafe_allow_html=True)
-        with col3:
-            st.markdown(f'<a href="#" onclick="window.print();return false;">📥 Скачать PDF (печать)</a>', unsafe_allow_html=True)
+            st.markdown(get_excel_download_link(trend_df, f"{domain}_trends.xlsx"), unsafe_allow_html=True)
         
-        # Статистика роста
+        # Статистика
         col1, col2 = st.columns(2)
         
         with col1:
+            st.info(f"**Всего публикаций:** {metrics['papers_total']:,}")
             st.info(f"**Рост публикаций:** {metrics['papers_growth']}% за последние 2 года")
             st.info(f"**Средняя цитируемость:** {metrics['papers_cited_avg']}")
         
         with col2:
-            st.info(f"**Рост патентов:** {metrics['patents_growth']}% за последние 2 года")
             st.info(f"**Всего патентов:** {metrics['patents_total']:,}")
+            st.info(f"**Рост патентов:** {metrics['patents_growth']}% за последние 2 года")
     
     with tab2:
         st.subheader("Топ заявителей")
@@ -283,9 +288,9 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
             
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown(get_csv_download_link(assignee_df, f"{domain}_assignees.csv", "📥 Скачать CSV"), unsafe_allow_html=True)
+                st.markdown(get_csv_download_link(assignee_df, f"{domain}_assignees.csv"), unsafe_allow_html=True)
             with col2:
-                st.markdown(get_excel_download_link(assignee_df, f"{domain}_assignees.xlsx", "📥 Скачать Excel"), unsafe_allow_html=True)
+                st.markdown(get_excel_download_link(assignee_df, f"{domain}_assignees.xlsx"), unsafe_allow_html=True)
         else:
             st.info("Нет данных о заявителях")
     
@@ -316,9 +321,9 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
             # Данные для скачивания
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown(get_csv_download_link(geo_df, f"{domain}_geography.csv", "📥 Скачать CSV"), unsafe_allow_html=True)
+                st.markdown(get_csv_download_link(geo_df, f"{domain}_geography.csv"), unsafe_allow_html=True)
             with col2:
-                st.markdown(get_excel_download_link(geo_df, f"{domain}_geography.xlsx", "📥 Скачать Excel"), unsafe_allow_html=True)
+                st.markdown(get_excel_download_link(geo_df, f"{domain}_geography.xlsx"), unsafe_allow_html=True)
         else:
             st.info("Нет данных о географическом распределении")
     
@@ -353,20 +358,20 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
             
             col_a, col_b = st.columns(2)
             with col_a:
-                st.markdown(get_csv_download_link(ai_df, f"{domain}_ai.csv", "📥 Скачать CSV"), unsafe_allow_html=True)
+                st.markdown(get_csv_download_link(ai_df, f"{domain}_ai.csv"), unsafe_allow_html=True)
             with col_b:
-                st.markdown(get_excel_download_link(ai_df, f"{domain}_ai.xlsx", "📥 Скачать Excel"), unsafe_allow_html=True)
+                st.markdown(get_excel_download_link(ai_df, f"{domain}_ai.xlsx"), unsafe_allow_html=True)
         
         with col2:
             st.metric(
                 "🤖 Доля AI-патентов",
                 f"{metrics['ai_share']}%",
-                delta=f"{metrics['ai_share'] - 15:.1f}% vs среднему"
+                delta=None
             )
             
             if domain == "Полупроводники":
                 st.info("""
-                **AI-патенты в полупроводниках:**
+                **Технологии, связанные с AI:**
                 - GAA транзисторы
                 - Квантовые точки
                 - 2D материалы
@@ -374,16 +379,17 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
                 """)
             else:
                 st.info("""
-                **AI-патенты в генной инженерии:**
+                **Технологии, связанные с AI:**
                 - CRISPR-Cas9
                 - CRISPR-Cas12a
                 - Базовое редактирование
                 - Прайм-редактирование
                 """)
     
-    # Дополнительная информация
+    # Детальная статистика (исправлено для Arrow)
     with st.expander("📊 Детальная статистика"):
-        stats_df = pd.DataFrame({
+        # Создаем DataFrame с правильными типами данных
+        stats_data = {
             'Метрика': [
                 'Всего публикаций',
                 'Всего патентов',
@@ -395,25 +401,36 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
                 'AI доля'
             ],
             'Значение': [
-                f"{metrics['papers_total']:,}",
-                f"{metrics['patents_total']:,}",
-                metrics['papers_cited_avg'],
+                str(metrics['papers_total']),
+                str(metrics['patents_total']),
+                str(metrics['papers_cited_avg']),
                 f"{metrics['papers_growth']}%",
                 f"{metrics['patents_growth']}%",
-                f"{metrics['time_lag']} лет ({metrics['time_lag_change']})",
-                f"{metrics['trend_score']} ({metrics['trend_status']})",
+                f"{metrics['time_lag']} лет",
+                f"{metrics['trend_score']}",
                 f"{metrics['ai_share']}%"
+            ],
+            'Статус': [
+                '-',
+                '-',
+                '-',
+                'за 2 года',
+                'за 2 года',
+                metrics['time_lag_change'],
+                metrics['trend_status'],
+                '-'
             ]
-        })
+        }
         
-        st.dataframe(stats_df, use_container_width=True)
+        stats_df = pd.DataFrame(stats_data)
+        st.dataframe(stats_df, use_container_width=True, hide_index=True)
         
         # Скачать статистику
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(get_csv_download_link(stats_df, f"{domain}_statistics.csv", "📥 Скачать статистику CSV"), unsafe_allow_html=True)
+            st.markdown(get_csv_download_link(stats_df, f"{domain}_statistics.csv"), unsafe_allow_html=True)
         with col2:
-            st.markdown(get_excel_download_link(stats_df, f"{domain}_statistics.xlsx", "📥 Скачать статистику Excel"), unsafe_allow_html=True)
+            st.markdown(get_excel_download_link(stats_df, f"{domain}_statistics.xlsx"), unsafe_allow_html=True)
 
 else:
     # Приветственный экран
@@ -427,46 +444,47 @@ else:
     
     with col1:
         st.markdown("### 🧬 Генная инженерия")
-        st.success("✅ Реальные данные от коллег (Мария)")
-        st.caption("Обновлено: 2024-03-15")
+        if gene_file.exists():
+            st.success("✅ Данные загружены")
+            size_mb = gene_file.stat().st_size / (1024 * 1024)
+            st.caption(f"Размер: {size_mb:.1f} MB")
+        else:
+            st.warning("⏳ Данные не найдены")
+        st.caption("Источник: лаборатория генной инженерии")
     
     with col2:
         st.markdown("### 💻 Полупроводники")
-        st.success("✅ Реальные данные от коллег (Алексей)")
-        st.caption("Обновлено: 2024-03-14")
+        if semi_file.exists():
+            st.success("✅ Данные загружены")
+            size_mb = semi_file.stat().st_size / (1024 * 1024)
+            st.caption(f"Размер: {size_mb:.1f} MB")
+        else:
+            st.warning("⏳ Данные не найдены")
+        st.caption("Источник: лаборатория полупроводников")
     
     with col3:
         st.markdown("### ☁️ BigQuery")
         st.warning("⏳ В процессе подключения")
-        st.caption("Ожидается доступ от коллег")
+        st.caption("Ожидается доступ")
     
     st.markdown("---")
     
-    # Превью
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        ### 🧬 Генная инженерия
-        - **Компании:** Editas, CRISPR Therapeutics, Intellia, Moderna, BioNTech
-        - **Технологии:** CRISPR, CAR-T, мРНК, генная терапия
-        - **Университеты:** Harvard, MIT, Stanford, Oxford
-        """)
+    # Превью данных
+    if gene_file.exists() or semi_file.exists():
+        st.subheader("📊 Доступные данные")
         
         if gene_file.exists():
-            st.success("✅ Данные готовы к загрузке")
-        else:
-            st.error("❌ Данные не найдены! Запустите create_data.py")
-    
-    with col2:
-        st.markdown("""
-        ### 💻 Полупроводники
-        - **Компании:** TSMC, Intel, Samsung, NVIDIA, AMD
-        - **Технологии:** FinFET, EUV, 3D NAND, GaN, SiC
-        - **Университеты:** MIT, Stanford, UC Berkeley, Georgia Tech
-        """)
+            with st.expander("🧬 Генная инженерия -预览"):
+                try:
+                    df_preview = pd.read_parquet(gene_file).head(5)
+                    st.dataframe(df_preview)
+                except:
+                    st.info("Не удалось загрузить превью")
         
         if semi_file.exists():
-            st.success("✅ Данные готовы к загрузке")
-        else:
-            st.error("❌ Данные не найдены! Запустите create_data.py")
+            with st.expander("💻 Полупроводники -预览"):
+                try:
+                    df_preview = pd.read_parquet(semi_file).head(5)
+                    st.dataframe(df_preview)
+                except:
+                    st.info("Не удалось загрузить превью")
