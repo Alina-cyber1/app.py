@@ -9,7 +9,38 @@ from datetime import datetime
 DATA_DIR = Path(__file__).parent / "data" / "processed"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-def _check_files_exist():
+# Информация об источниках данных
+DATA_SOURCES = {
+    "gene_engineering": {
+        "source": "Коллеги из лаборатории генной инженерии (Мария и команда)",
+        "date": "2024-03-15",
+        "description": "Данные по патентам и публикациям в области генной инженерии",
+        "status": "✅ Реальные данные"
+    },
+    "semiconductors": {
+        "source": "Коллеги из лаборатории полупроводников (Алексей и команда)",
+        "date": "2024-03-14", 
+        "description": "Данные по патентам и публикациям в области полупроводников",
+        "status": "✅ Реальные данные"
+    },
+    "bigquery": {
+        "source": "BigQuery (ожидается доступ от коллег)",
+        "date": "Ожидается",
+        "description": "Интеграция с BigQuery для автоматической загрузки данных",
+        "status": "⏳ В процессе подключения"
+    }
+}
+
+def get_data_source_info(domain):
+    """Возвращает информацию об источнике данных для домена"""
+    if domain == "Полупроводники":
+        return DATA_SOURCES["semiconductors"]
+    elif domain == "Генная инженерия":
+        return DATA_SOURCES["gene_engineering"]
+    else:
+        return DATA_SOURCES["bigquery"]
+
+def check_files_exist():
     """Проверяет наличие всех необходимых файлов"""
     required_files = [
         "gene_engineering_clean.parquet",
@@ -23,7 +54,7 @@ def _check_files_exist():
     
     return missing_files
 
-def _generate_fallback_data(domain_clean, error_msg=""):
+def generate_fallback_data(domain_clean, error_msg=""):
     """Генерирует тестовые данные, если реальные недоступны"""
     print(f"⚠️ Использую ТЕСТОВЫЕ данные для {domain_clean}. Ошибка: {error_msg}")
     dates = pd.date_range(start='2020-01-01', end='2025-12-01', freq='MS').strftime('%Y-%m').tolist()
@@ -64,20 +95,22 @@ def load_domain_data(domain_clean):
     if domain_clean == "Полупроводники":
         data_file = DATA_DIR / "semiconductors_clean.parquet"
         domain_prefix = "semiconductors"
+        source_info = DATA_SOURCES["semiconductors"]
     elif domain_clean == "Генная инженерия":
         data_file = DATA_DIR / "gene_engineering_clean.parquet"
         domain_prefix = "gene_engineering"
+        source_info = DATA_SOURCES["gene_engineering"]
     else:
-        return _generate_fallback_data(domain_clean, "Неизвестный домен")
+        return generate_fallback_data(domain_clean, "Неизвестный домен")
     
     # Проверяем существование файла
     if not data_file.exists():
         print(f"❌ Файл {data_file} не найден!")
-        missing = _check_files_exist()
+        missing = check_files_exist()
         if missing:
             print(f"📋 Отсутствуют файлы: {missing}")
             print("💡 Запустите create_data.py для генерации данных")
-        return _generate_fallback_data(domain_clean, f"Файл {data_file.name} не найден")
+        return generate_fallback_data(domain_clean, f"Файл {data_file.name} не найден")
     
     try:
         # Загружаем данные через DuckDB
@@ -93,7 +126,7 @@ def load_domain_data(domain_clean):
         
         if len(df_all) == 0:
             print(f"⚠️ Нет данных для домена {domain_clean}")
-            return _generate_fallback_data(domain_clean, "Нет данных в файле")
+            return generate_fallback_data(domain_clean, "Нет данных в файле")
         
         print(f"✅ Загружено {len(df_all)} записей")
         
@@ -151,7 +184,7 @@ def load_domain_data(domain_clean):
             # Для патентов
             patents_aligned = [patents_dict.get(month, 0) for month in all_months]
         else:
-            return _generate_fallback_data(domain_clean, "Нет данных для временного ряда")
+            return generate_fallback_data(domain_clean, "Нет данных для временного ряда")
         
         # --- Расчёт метрик роста ---
         if len(papers_aligned) >= 24:
@@ -305,7 +338,8 @@ def load_domain_data(domain_clean):
             'top_assignees': top_assignees,
             'assignee_values': assignee_values,
             'countries': countries,
-            'country_values': country_values
+            'country_values': country_values,
+            'source_info': source_info  # Добавляем информацию об источнике
         }
         
         print("✅ Данные успешно загружены и обработаны")
@@ -314,4 +348,4 @@ def load_domain_data(domain_clean):
     except Exception as e:
         print(f"❌ Ошибка при загрузке данных: {e}")
         traceback.print_exc()
-        return _generate_fallback_data(domain_clean, str(e))
+        return generate_fallback_data(domain_clean, str(e))
