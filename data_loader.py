@@ -91,20 +91,22 @@ def generate_fallback_data(domain_clean, error_msg=""):
     else:
         metrics['trend_status'] = "Созревание"
     
-    return np.array(dates), np.array(papers), np.array(patents), metrics
+    return np.array(dates), np.array(papers), np.array(patents), metrics, None, None, None
 
 def calculate_trend_score(papers_series, patents_series, months):
     """
     Рассчитывает Trend Score на основе динамики публикаций и патентов
+    Возвращает score от 0 до 100 и статус
     """
     try:
         if len(papers_series) < 12 or len(patents_series) < 12:
             return 50, "Стабильный рост"
         
-        # Рассчитываем склоны за последние 3 года
+        # Рассчитываем склоны за последние 3 года с разными весами
         years = min(3, len(months) // 12)
         papers_slopes = []
         patents_slopes = []
+        weights = [0.5, 0.3, 0.2]  # Последний год важнее
         
         for y in range(years):
             # Данные за год
@@ -118,21 +120,33 @@ def calculate_trend_score(papers_series, patents_series, months):
                 x = np.arange(len(papers_year))
                 # Используем полином первой степени для определения тренда
                 coeffs = np.polyfit(x, papers_year, 1)
-                papers_slopes.append(max(0, coeffs[0]))  # Берем только положительные тренды
+                slope = coeffs[0]
+                # Нормализуем slope относительно среднего значения
+                mean_val = np.mean(papers_year) if np.mean(papers_year) > 0 else 1
+                normalized_slope = (slope / mean_val) * 100
+                papers_slopes.append(max(0, normalized_slope * weights[y] if y < len(weights) else normalized_slope * 0.1))
             
             if len(patents_year) > 1:
                 x = np.arange(len(patents_year))
                 coeffs = np.polyfit(x, patents_year, 1)
-                patents_slopes.append(max(0, coeffs[0]))
+                slope = coeffs[0]
+                mean_val = np.mean(patents_year) if np.mean(patents_year) > 0 else 1
+                normalized_slope = (slope / mean_val) * 100
+                patents_slopes.append(max(0, normalized_slope * weights[y] if y < len(weights) else normalized_slope * 0.1))
         
         # Усредняем склоны
-        avg_papers_slope = np.mean(papers_slopes) if papers_slopes else 0
-        avg_patents_slope = np.mean(patents_slopes) if patents_slopes else 0
+        avg_papers_slope = np.sum(papers_slopes) if papers_slopes else 0
+        avg_patents_slope = np.sum(patents_slopes) if patents_slopes else 0
         
-        # Нормализуем и рассчитываем score
-        max_slope = max(avg_papers_slope, avg_patents_slope, 1)
-        combined_slope = (avg_papers_slope + avg_patents_slope) / 2
-        trend_score = int(min(100, (combined_slope / max_slope) * 50 + 50))
+        # Комбинируем с весами для публикаций и патентов
+        papers_weight = 0.4  # Публикации немного важнее для определения тренда
+        patents_weight = 0.6  # Патенты показывают коммерческий потенциал
+        
+        combined_slope = (avg_papers_slope * papers_weight + avg_patents_slope * patents_weight)
+        
+        # Преобразуем в score от 0 до 100
+        # Типичные значения normalized slope: от 0 до 200
+        trend_score = int(min(100, max(0, combined_slope)))
         
         # Определяем статус
         if trend_score >= 80:
@@ -141,19 +155,25 @@ def calculate_trend_score(papers_series, patents_series, months):
             trend_status = "Стабильный рост"
         elif trend_score >= 40:
             trend_status = "Умеренный рост"
-        else:
+        elif trend_score >= 20:
             trend_status = "Созревание"
+        else:
+            trend_status = "Стагнация"
+        
+        print(f"📊 Trend Score расчет: papers_slope={avg_papers_slope:.1f}, patents_slope={avg_patents_slope:.1f}, score={trend_score}")
         
         return trend_score, trend_status
         
     except Exception as e:
         print(f"⚠️ Ошибка при расчете Trend Score: {e}")
+        traceback.print_exc()
         return 50, "Стабильный рост"
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
     """
     Загружает данные для указанного домена из локальных parquet файлов
+    Возвращает: months, papers, patents, metrics, df_papers, df_patents, df_all
     """
     print(f"🔍 Загрузка данных для домена: {domain_clean}")
     
@@ -268,7 +288,7 @@ def load_domain_data(domain_clean):
         else:
             patents_growth = 0
         
-        # --- Trend Score (используем новую функцию) ---
+        # --- Trend Score (используем улучшенную функцию) ---
         trend_score, trend_status = calculate_trend_score(
             np.array(papers_aligned), 
             np.array(patents_aligned), 
@@ -390,7 +410,7 @@ def load_domain_data(domain_clean):
         print(f"   Trend Score: {trend_score} - {trend_status}")
         print(f"   Всего публикаций: {papers_total}, патентов: {patents_total}")
         
-        return np.array(all_months), np.array(papers_aligned), np.array(patents_aligned), metrics
+        return np.array(all_months), np.array(papers_aligned), np.array(patents_aligned), metrics, df_papers, df_patents, df_all
         
     except Exception as e:
         print(f"❌ Ошибка при загрузке данных: {e}")
