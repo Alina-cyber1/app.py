@@ -5,9 +5,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import traceback
+from pathlib import Path
 
 # Импортируем функции из data_loader
-from data_loader import load_domain_data, _download_files
+from data_loader import load_domain_data
 
 # ДОЛЖНА быть первой командой Streamlit
 st.set_page_config(
@@ -27,6 +28,11 @@ if 'data_loaded' not in st.session_state:
 if 'current_domain' not in st.session_state:
     st.session_state.current_domain = None
 
+# Проверка наличия данных
+DATA_DIR = Path(__file__).parent / "data" / "processed"
+gene_file = DATA_DIR / "gene_engineering_clean.parquet"
+semi_file = DATA_DIR / "semiconductors_clean.parquet"
+
 # Боковая панель
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -41,13 +47,25 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Статус данных
+    st.subheader("📁 Статус данных")
+    
+    if gene_file.exists():
+        st.success("✅ Генная инженерия: данные есть")
+    else:
+        st.warning("⚠️ Генная инженерия: данных нет")
+    
+    if semi_file.exists():
+        st.success("✅ Полупроводники: данные есть")
+    else:
+        st.warning("⚠️ Полупроводники: данных нет")
+    
+    st.markdown("---")
+    
     # Кнопка загрузки данных
     if st.button("🚀 Загрузить данные", type="primary", use_container_width=True):
-        with st.spinner("🔄 Загрузка данных... Это может занять несколько минут..."):
+        with st.spinner("🔄 Загрузка данных... Это может занять несколько секунд..."):
             try:
-                # Сначала проверяем/скачиваем файлы
-                _download_files()
-                
                 # Загружаем данные
                 months, papers, patents, metrics = load_domain_data(domain)
                 
@@ -82,14 +100,14 @@ with st.sidebar:
         - 💻 **Полупроводники**
         
         **Типы данных:**
-        - Публикации (статьи)
+        - Публикации (научные статьи)
         - Патенты
-        - CPC классификация
-        - Заявители
+        - Компании и университеты
+        - Технологические темы
         
         **Метрики:**
-        - Trend Score
-        - Time Lag
+        - Trend Score (оценка тренда)
+        - Time Lag (временной лаг)
         - AI-интеграция
         - География
         """)
@@ -189,7 +207,7 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
     with tab2:
         st.subheader("Топ заявителей")
         
-        if metrics['top_assignees'] and metrics['assignee_values']:
+        if metrics['top_assignees'] and metrics['assignee_values'] and metrics['top_assignees'][0] != "Нет данных":
             # Горизонтальная бар-чарт
             fig = px.bar(
                 x=metrics['assignee_values'],
@@ -209,7 +227,7 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
     with tab3:
         st.subheader("Географическое распределение")
         
-        if metrics['countries'] and metrics['country_values']:
+        if metrics['countries'] and metrics['country_values'] and metrics['countries'][0] != "Нет данных":
             # Круговая диаграмма
             fig = px.pie(
                 values=metrics['country_values'],
@@ -262,16 +280,22 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
                 delta=f"{metrics['ai_share'] - 15:.1f}% vs среднему"
             )
             
-            st.info("""
-            **Что такое AI-патенты?**
-            
-            Патенты с классификацией G06N (Computer systems based on specific computational models)
-            
-            *Нейронные сети
-            *Машинное обучение
-            *Искусственный интеллект
-            *Эволюционные вычисления
-            """)
+            if domain == "Полупроводники":
+                st.info("""
+                **AI-патенты в полупроводниках:**
+                - GAA транзисторы
+                - Квантовые точки
+                - 2D материалы
+                - Нейроморфные вычисления
+                """)
+            else:
+                st.info("""
+                **AI-патенты в генной инженерии:**
+                - CRISPR-Cas9
+                - CRISPR-Cas12a
+                - Базовое редактирование
+                - Прайм-редактирование
+                """)
     
     # Дополнительная информация
     with st.expander("📊 Детальная статистика"):
@@ -310,24 +334,32 @@ else:
     with col1:
         st.markdown("""
         ### 🧬 Генная инженерия
-        - Анализ публикаций и патентов
-        - Тренды развития технологий
-        - Ключевые игроки рынка
-        - География исследований
+        - **Компании:** Editas, CRISPR Therapeutics, Intellia, Moderna, BioNTech
+        - **Технологии:** CRISPR, CAR-T, мРНК, генная терапия
+        - **Университеты:** Harvard, MIT, Stanford, Oxford
         """)
+        
+        if gene_file.exists():
+            st.success("✅ Данные готовы к загрузке")
+        else:
+            st.error("❌ Данные не найдены! Запустите create_data.py")
     
     with col2:
         st.markdown("""
         ### 💻 Полупроводники
-        - Динамика патентования
-        - Технологические тренды
-        - Лидеры инноваций
-        - AI-интеграция
+        - **Компании:** TSMC, Intel, Samsung, NVIDIA, AMD
+        - **Технологии:** FinFET, EUV, 3D NAND, GaN, SiC
+        - **Университеты:** MIT, Stanford, UC Berkeley, Georgia Tech
         """)
+        
+        if semi_file.exists():
+            st.success("✅ Данные готовы к загрузке")
+        else:
+            st.error("❌ Данные не найдены! Запустите create_data.py")
     
     # Пример графика
     st.markdown("---")
-    st.subheader("📈 Пример визуализации")
+    st.subheader("📈 Пример визуализации (после загрузки данных)")
     
     # Демо-данные
     demo_dates = pd.date_range(start='2020-01-01', end='2025-12-01', freq='MS').strftime('%Y-%m')
