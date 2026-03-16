@@ -10,7 +10,7 @@ import io
 import base64
 
 # Импортируем функции из data_loader
-from data_loader import load_domain_data, get_data_source_info, DATA_SOURCES
+from data_loader import load_domain_data, get_data_source_info, DATA_SOURCES, check_files_exist
 
 # ДОЛЖНА быть первой командой Streamlit
 st.set_page_config(
@@ -46,6 +46,12 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'current_domain' not in st.session_state:
     st.session_state.current_domain = None
+if 'df_papers' not in st.session_state:
+    st.session_state.df_papers = None
+if 'df_patents' not in st.session_state:
+    st.session_state.df_patents = None
+if 'df_all' not in st.session_state:
+    st.session_state.df_all = None
 
 # Проверка наличия данных
 DATA_DIR = Path(__file__).parent / "data" / "processed"
@@ -66,22 +72,29 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Фильтры по годам
+    st.subheader("📅 Фильтры")
+    year_range = st.slider(
+        "Диапазон лет",
+        min_value=2015,
+        max_value=2025,
+        value=(2015, 2025)
+    )
+    
+    st.markdown("---")
+    
     # Статус данных
     st.subheader("📁 Статус данных")
     
-    if gene_file.exists():
-        st.success("✅ Генная инженерия: данные есть")
-        # Показываем размер файла
-        size_mb = gene_file.stat().st_size / (1024 * 1024)
-        st.caption(f"Размер: {size_mb:.1f} MB")
+    missing_files, file_sizes = check_files_exist()
+    
+    if "gene_engineering_clean.parquet" in file_sizes:
+        st.success(f"✅ Генная инженерия: {file_sizes['gene_engineering_clean.parquet']} MB")
     else:
         st.warning("⚠️ Генная инженерия: данных нет")
     
-    if semi_file.exists():
-        st.success("✅ Полупроводники: данные есть")
-        # Показываем размер файла
-        size_mb = semi_file.stat().st_size / (1024 * 1024)
-        st.caption(f"Размер: {size_mb:.1f} MB")
+    if "semiconductors_clean.parquet" in file_sizes:
+        st.success(f"✅ Полупроводники: {file_sizes['semiconductors_clean.parquet']} MB")
     else:
         st.warning("⚠️ Полупроводники: данных нет")
     
@@ -92,13 +105,29 @@ with st.sidebar:
         with st.spinner("🔄 Загрузка данных... Это может занять несколько секунд..."):
             try:
                 # Загружаем данные
-                months, papers, patents, metrics = load_domain_data(domain)
+                months, papers, patents, metrics, df_papers, df_patents, df_all = load_domain_data(domain)
+                
+                # Применяем фильтр по годам
+                if len(months) > 0:
+                    years_in_data = [int(m[:4]) for m in months]
+                    mask = [(year_range[0] <= y <= year_range[1]) for y in years_in_data]
+                    
+                    months_filtered = np.array(months)[mask]
+                    papers_filtered = np.array(papers)[mask]
+                    patents_filtered = np.array(patents)[mask]
+                else:
+                    months_filtered = months
+                    papers_filtered = papers
+                    patents_filtered = patents
                 
                 # Сохраняем в session state
-                st.session_state.months = months
-                st.session_state.papers = papers
-                st.session_state.patents = patents
+                st.session_state.months = months_filtered
+                st.session_state.papers = papers_filtered
+                st.session_state.patents = patents_filtered
                 st.session_state.metrics = metrics
+                st.session_state.df_papers = df_papers
+                st.session_state.df_patents = df_patents
+                st.session_state.df_all = df_all
                 st.session_state.data_loaded = True
                 st.session_state.current_domain = domain
                 
@@ -112,6 +141,9 @@ with st.sidebar:
     if st.button("🔄 Очистить кэш"):
         st.cache_data.clear()
         st.session_state.data_loaded = False
+        st.session_state.df_papers = None
+        st.session_state.df_patents = None
+        st.session_state.df_all = None
         st.success("✅ Кэш очищен!")
         st.rerun()
     
@@ -161,11 +193,15 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
     papers = st.session_state.papers
     patents = st.session_state.patents
     metrics = st.session_state.metrics
+    df_papers = st.session_state.df_papers
+    df_patents = st.session_state.df_patents
+    df_all = st.session_state.df_all
     
     # Заголовок с доменом
     st.header(f"📈 Анализ домена: {domain}")
     source_info = get_data_source_info(domain)
     st.caption(f"📊 Данные предоставлены: {source_info['source']} | Обновлено: {source_info['date']}")
+    st.caption(f"📅 Период: {year_range[0]}-{year_range[1]}")
     
     # Метрики в карточках
     col1, col2, col3, col4 = st.columns(4)
@@ -201,31 +237,57 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
     st.markdown("---")
     
     # Вкладки
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Тренды", "🏢 Заявители", "🌍 География", "🤖 AI-анализ"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Тренды", "🏢 Заявители", "🌍 География", "🤖 AI-анализ", "🔬 Диагностика"])
     
     with tab1:
         st.subheader("Динамика публикаций и патентов")
         
-        # График трендов
+        # График трендов с сглаживанием
         fig = go.Figure()
         
+        # Исходные данные
         fig.add_trace(go.Scatter(
             x=months,
             y=papers,
             mode='lines+markers',
             name='Публикации',
-            line=dict(color='#1f77b4', width=3),
-            marker=dict(size=4)
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=4),
+            opacity=0.7
         ))
+        
+        # Сглаженные данные (скользящее среднее за 3 месяца)
+        if len(papers) > 3:
+            papers_smoothed = pd.Series(papers).rolling(window=3, center=True).mean()
+            fig.add_trace(go.Scatter(
+                x=months,
+                y=papers_smoothed,
+                mode='lines',
+                name='Публикации (сглаж.)',
+                line=dict(color='#1f77b4', width=3, dash='dash'),
+                opacity=0.9
+            ))
         
         fig.add_trace(go.Scatter(
             x=months,
             y=patents,
             mode='lines+markers',
             name='Патенты',
-            line=dict(color='#ff7f0e', width=3),
-            marker=dict(size=4)
+            line=dict(color='#ff7f0e', width=2),
+            marker=dict(size=4),
+            opacity=0.7
         ))
+        
+        if len(patents) > 3:
+            patents_smoothed = pd.Series(patents).rolling(window=3, center=True).mean()
+            fig.add_trace(go.Scatter(
+                x=months,
+                y=patents_smoothed,
+                mode='lines',
+                name='Патенты (сглаж.)',
+                line=dict(color='#ff7f0e', width=3, dash='dash'),
+                opacity=0.9
+            ))
         
         fig.update_layout(
             title="Сравнение динамики публикаций и патентов",
@@ -386,7 +448,37 @@ if st.session_state.data_loaded and st.session_state.current_domain == domain:
                 - Прайм-редактирование
                 """)
     
-    # Детальная статистика (исправлено для Arrow)
+    with tab5:
+        st.subheader("🔬 Диагностика данных")
+        
+        # Проверяем публикации
+        st.write("**Статистика по загруженным данным:**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Всего записей", len(df_all) if df_all is not None else 0)
+            st.metric("Публикаций", len(df_papers) if df_papers is not None else 0)
+            st.metric("Патентов", len(df_patents) if df_patents is not None else 0)
+        
+        with col2:
+            st.metric("Временной ряд (месяцев)", len(months))
+            st.metric("Диапазон дат", f"{months[0] if len(months) > 0 else 'Нет'} - {months[-1] if len(months) > 0 else 'Нет'}")
+            st.metric("Trend Score", f"{metrics['trend_score']}/100")
+        
+        # Превью публикаций
+        if df_papers is not None and len(df_papers) > 0:
+            with st.expander("📄 Превью публикаций (первые 5)"):
+                preview_cols = ['title', 'assignee', 'year', 'citations'] if all(col in df_papers.columns for col in ['title', 'assignee', 'year', 'citations']) else df_papers.columns.tolist()[:5]
+                st.dataframe(df_papers[preview_cols].head(5) if isinstance(preview_cols, list) else df_papers.head(5))
+        
+        # Превью патентов
+        if df_patents is not None and len(df_patents) > 0:
+            with st.expander("📃 Превью патентов (первые 5)"):
+                preview_cols = ['title', 'assignee', 'year', 'patent_number'] if all(col in df_patents.columns for col in ['title', 'assignee', 'year', 'patent_number']) else df_patents.columns.tolist()[:5]
+                st.dataframe(df_patents[preview_cols].head(5) if isinstance(preview_cols, list) else df_patents.head(5))
+    
+    # Детальная статистика
     with st.expander("📊 Детальная статистика"):
         # Создаем DataFrame с правильными типами данных
         stats_data = {
@@ -440,24 +532,22 @@ else:
     st.markdown("---")
     st.subheader("📋 Статус подключения источников данных")
     
+    missing_files, file_sizes = check_files_exist()
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("### 🧬 Генная инженерия")
-        if gene_file.exists():
-            st.success("✅ Данные загружены")
-            size_mb = gene_file.stat().st_size / (1024 * 1024)
-            st.caption(f"Размер: {size_mb:.1f} MB")
+        if "gene_engineering_clean.parquet" in file_sizes:
+            st.success(f"✅ Данные загружены ({file_sizes['gene_engineering_clean.parquet']} MB)")
         else:
             st.warning("⏳ Данные не найдены")
         st.caption("Источник: лаборатория генной инженерии")
     
     with col2:
         st.markdown("### 💻 Полупроводники")
-        if semi_file.exists():
-            st.success("✅ Данные загружены")
-            size_mb = semi_file.stat().st_size / (1024 * 1024)
-            st.caption(f"Размер: {size_mb:.1f} MB")
+        if "semiconductors_clean.parquet" in file_sizes:
+            st.success(f"✅ Данные загружены ({file_sizes['semiconductors_clean.parquet']} MB)")
         else:
             st.warning("⏳ Данные не найдены")
         st.caption("Источник: лаборатория полупроводников")
@@ -470,21 +560,23 @@ else:
     st.markdown("---")
     
     # Превью данных
-    if gene_file.exists() or semi_file.exists():
+    if "gene_engineering_clean.parquet" in file_sizes or "semiconductors_clean.parquet" in file_sizes:
         st.subheader("📊 Доступные данные")
         
-        if gene_file.exists():
-            with st.expander("🧬 Генная инженерия -预览"):
+        if "gene_engineering_clean.parquet" in file_sizes:
+            with st.expander("🧬 Генная инженерия - превью"):
                 try:
                     df_preview = pd.read_parquet(gene_file).head(5)
                     st.dataframe(df_preview)
-                except:
-                    st.info("Не удалось загрузить превью")
+                    st.caption(f"Всего записей: {len(pd.read_parquet(gene_file))}")
+                except Exception as e:
+                    st.info(f"Не удалось загрузить превью: {e}")
         
-        if semi_file.exists():
-            with st.expander("💻 Полупроводники -预览"):
+        if "semiconductors_clean.parquet" in file_sizes:
+            with st.expander("💻 Полупроводники - превью"):
                 try:
                     df_preview = pd.read_parquet(semi_file).head(5)
                     st.dataframe(df_preview)
-                except:
-                    st.info("Не удалось загрузить превью")
+                    st.caption(f"Всего записей: {len(pd.read_parquet(semi_file))}")
+                except Exception as e:
+                    st.info(f"Не удалось загрузить превью: {e}")
