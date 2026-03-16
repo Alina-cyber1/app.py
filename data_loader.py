@@ -12,19 +12,19 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Информация об источниках данных
 DATA_SOURCES = {
     "gene_engineering": {
-        "source": "Коллеги из лаборатории генной инженерии (Мария и команда)",
+        "source": "лаборатория генной инженерии",
         "date": "2024-03-15",
         "description": "Данные по патентам и публикациям в области генной инженерии",
         "status": "✅ Реальные данные"
     },
     "semiconductors": {
-        "source": "Коллеги из лаборатории полупроводников (Алексей и команда)",
-        "date": "2024-03-14", 
+        "source": "лаборатория полупроводников", 
+        "date": "2024-03-14",
         "description": "Данные по патентам и публикациям в области полупроводников",
         "status": "✅ Реальные данные"
     },
     "bigquery": {
-        "source": "BigQuery (ожидается доступ от коллег)",
+        "source": "BigQuery",
         "date": "Ожидается",
         "description": "Интеграция с BigQuery для автоматической загрузки данных",
         "status": "⏳ В процессе подключения"
@@ -48,11 +48,17 @@ def check_files_exist():
     ]
     
     missing_files = []
+    file_sizes = {}
+    
     for filename in required_files:
-        if not (DATA_DIR / filename).exists():
+        filepath = DATA_DIR / filename
+        if filepath.exists():
+            size_mb = filepath.stat().st_size / (1024 * 1024)
+            file_sizes[filename] = round(size_mb, 1)
+        else:
             missing_files.append(filename)
     
-    return missing_files
+    return missing_files, file_sizes
 
 def generate_fallback_data(domain_clean, error_msg=""):
     """Генерирует тестовые данные, если реальные недоступны"""
@@ -71,18 +77,78 @@ def generate_fallback_data(domain_clean, error_msg=""):
         'trend_score': np.random.randint(60, 95),
         'trend_status': np.random.choice(['Взрывной рост', 'Стабильный рост', 'Созревание']),
         'ai_share': np.random.randint(15, 45),
-        'top_assignees': ['Тест-Компания А', 'Тест-Компания Б', 'Тест-Компания В'],
+        'top_assignees': ['Компания А', 'Компания Б', 'Компания В'],
         'assignee_values': [150, 90, 45],
         'countries': ['США', 'Китай', 'Германия'],
         'country_values': [48, 32, 20]
     }
+    
+    # Определяем статус тренда
     if metrics['trend_score'] >= 80:
         metrics['trend_status'] = "Взрывной рост"
     elif metrics['trend_score'] >= 60:
         metrics['trend_status'] = "Стабильный рост"
     else:
         metrics['trend_status'] = "Созревание"
+    
     return np.array(dates), np.array(papers), np.array(patents), metrics
+
+def calculate_trend_score(papers_series, patents_series, months):
+    """
+    Рассчитывает Trend Score на основе динамики публикаций и патентов
+    """
+    try:
+        if len(papers_series) < 12 or len(patents_series) < 12:
+            return 50, "Стабильный рост"
+        
+        # Рассчитываем склоны за последние 3 года
+        years = min(3, len(months) // 12)
+        papers_slopes = []
+        patents_slopes = []
+        
+        for y in range(years):
+            # Данные за год
+            start_idx = -(y + 1) * 12
+            end_idx = -y * 12 if y > 0 else None
+            
+            papers_year = papers_series[start_idx:end_idx] if end_idx else papers_series[start_idx:]
+            patents_year = patents_series[start_idx:end_idx] if end_idx else patents_series[start_idx:]
+            
+            if len(papers_year) > 1:
+                x = np.arange(len(papers_year))
+                # Используем полином первой степени для определения тренда
+                coeffs = np.polyfit(x, papers_year, 1)
+                papers_slopes.append(max(0, coeffs[0]))  # Берем только положительные тренды
+            
+            if len(patents_year) > 1:
+                x = np.arange(len(patents_year))
+                coeffs = np.polyfit(x, patents_year, 1)
+                patents_slopes.append(max(0, coeffs[0]))
+        
+        # Усредняем склоны
+        avg_papers_slope = np.mean(papers_slopes) if papers_slopes else 0
+        avg_patents_slope = np.mean(patents_slopes) if patents_slopes else 0
+        
+        # Нормализуем и рассчитываем score
+        max_slope = max(avg_papers_slope, avg_patents_slope, 1)
+        combined_slope = (avg_papers_slope + avg_patents_slope) / 2
+        trend_score = int(min(100, (combined_slope / max_slope) * 50 + 50))
+        
+        # Определяем статус
+        if trend_score >= 80:
+            trend_status = "Взрывной рост"
+        elif trend_score >= 60:
+            trend_status = "Стабильный рост"
+        elif trend_score >= 40:
+            trend_status = "Умеренный рост"
+        else:
+            trend_status = "Созревание"
+        
+        return trend_score, trend_status
+        
+    except Exception as e:
+        print(f"⚠️ Ошибка при расчете Trend Score: {e}")
+        return 50, "Стабильный рост"
 
 @st.cache_data(ttl=3600)
 def load_domain_data(domain_clean):
@@ -106,7 +172,7 @@ def load_domain_data(domain_clean):
     # Проверяем существование файла
     if not data_file.exists():
         print(f"❌ Файл {data_file} не найден!")
-        missing = check_files_exist()
+        missing, sizes = check_files_exist()
         if missing:
             print(f"📋 Отсутствуют файлы: {missing}")
             print("💡 Запустите create_data.py для генерации данных")
@@ -117,6 +183,7 @@ def load_domain_data(domain_clean):
         con = duckdb.connect()
         
         print(f"📄 Загрузка данных из {data_file.name}")
+        print(f"   Размер файла: {data_file.stat().st_size / (1024*1024):.1f} MB")
         
         # Загружаем все записи для домена
         df_all = con.execute(f"""
@@ -131,8 +198,8 @@ def load_domain_data(domain_clean):
         print(f"✅ Загружено {len(df_all)} записей")
         
         # Разделяем на публикации и патенты
-        df_papers = df_all[df_all['type'] == 'publication'].copy()
-        df_patents = df_all[df_all['type'] == 'patent'].copy()
+        df_papers = df_all[df_all['type'] == 'publication'].copy() if 'type' in df_all.columns else pd.DataFrame()
+        df_patents = df_all[df_all['type'] == 'patent'].copy() if 'type' in df_all.columns else pd.DataFrame()
         
         print(f"   📄 Публикаций: {len(df_papers)}")
         print(f"   📃 Патентов: {len(df_patents)}")
@@ -143,7 +210,7 @@ def load_domain_data(domain_clean):
         patents_aligned = []
         
         # Публикации по месяцам
-        if len(df_papers) > 0:
+        if len(df_papers) > 0 and 'publication_date' in df_papers.columns:
             df_papers['month'] = pd.to_datetime(df_papers['publication_date']).dt.strftime('%Y-%m')
             papers_monthly = df_papers.groupby('month').size().reset_index(name='count')
             all_months = sorted(papers_monthly['month'].tolist())
@@ -161,7 +228,7 @@ def load_domain_data(domain_clean):
         
         # Патенты по месяцам
         patents_dict = {}
-        if len(df_patents) > 0:
+        if len(df_patents) > 0 and 'publication_date' in df_patents.columns:
             df_patents['month'] = pd.to_datetime(df_patents['publication_date']).dt.strftime('%Y-%m')
             patents_monthly = df_patents.groupby('month').size().reset_index(name='count')
             patents_dict = dict(zip(patents_monthly['month'], patents_monthly['count']))
@@ -175,7 +242,7 @@ def load_domain_data(domain_clean):
         # Выравниваем ряды
         if len(all_months) > 0:
             # Для публикаций
-            if len(df_papers) > 0:
+            if len(df_papers) > 0 and 'publication_date' in df_papers.columns:
                 papers_dict = dict(zip(papers_monthly['month'], papers_monthly['count']))
                 papers_aligned = [papers_dict.get(month, 0) for month in all_months]
             else:
@@ -201,57 +268,31 @@ def load_domain_data(domain_clean):
         else:
             patents_growth = 0
         
-        # --- Trend Score ---
-        if len(papers_aligned) >= 12 and len(patents_aligned) >= 12:
-            years = min(3, len(all_months)//12)
-            papers_slopes = []
-            for y in range(years):
-                y_data = papers_aligned[-(y+1)*12:-(y)*12] if y>0 else papers_aligned[-12:]
-                if len(y_data) > 1:
-                    x = np.arange(len(y_data))
-                    slope = np.polyfit(x, y_data, 1)[0]
-                    papers_slopes.append(max(0, slope))
-            avg_papers_slope = np.mean(papers_slopes) if papers_slopes else 0
-
-            patents_slopes = []
-            for y in range(years):
-                y_data = patents_aligned[-(y+1)*12:-(y)*12] if y>0 else patents_aligned[-12:]
-                if len(y_data) > 1:
-                    x = np.arange(len(y_data))
-                    slope = np.polyfit(x, y_data, 1)[0]
-                    patents_slopes.append(max(0, slope))
-            avg_patents_slope = np.mean(patents_slopes) if patents_slopes else 0
-
-            max_slope = max(avg_papers_slope, avg_patents_slope, 1)
-            trend_score = int(min(100, (avg_papers_slope + avg_patents_slope) / max_slope * 50 + 50))
-        else:
-            trend_score = 50
-
-        if trend_score >= 80:
-            trend_status = "Взрывной рост"
-        elif trend_score >= 60:
-            trend_status = "Стабильный рост"
-        else:
-            trend_status = "Созревание"
+        # --- Trend Score (используем новую функцию) ---
+        trend_score, trend_status = calculate_trend_score(
+            np.array(papers_aligned), 
+            np.array(patents_aligned), 
+            all_months
+        )
 
         # --- Time Lag ---
         try:
-            if len(papers_aligned) > 0 and len(patents_aligned) > 0:
+            if len(papers_aligned) > 0 and len(patents_aligned) > 0 and sum(papers_aligned) > 0 and sum(patents_aligned) > 0:
                 years_list = [int(m[:4]) for m in all_months]
                 weighted_year_papers = np.average(years_list, weights=papers_aligned)
                 weighted_year_patents = np.average(years_list, weights=patents_aligned)
                 time_lag = round(abs(weighted_year_patents - weighted_year_papers), 1)
             else:
-                time_lag = 3.0
+                time_lag = 0
         except:
-            time_lag = 3.0
+            time_lag = 0
 
         # Изменение time lag
         try:
             if len(all_months) >= 48:
                 recent_mask = [m >= all_months[-24] for m in all_months]
                 prev_mask = [m < all_months[-24] and m >= all_months[-48] for m in all_months]
-                if any(recent_mask) and any(prev_mask):
+                if any(recent_mask) and any(prev_mask) and sum(papers_aligned) > 0 and sum(patents_aligned) > 0:
                     recent_papers_weights = [p for p, m in zip(papers_aligned, recent_mask) if m]
                     recent_patents_weights = [p for p, m in zip(patents_aligned, recent_mask) if m]
                     recent_years = [int(m[:4]) for m, m_flag in zip(all_months, recent_mask) if m_flag]
@@ -260,7 +301,7 @@ def load_domain_data(domain_clean):
                     prev_patents_weights = [p for p, m in zip(patents_aligned, prev_mask) if m]
                     prev_years = [int(m[:4]) for m, m_flag in zip(all_months, prev_mask) if m_flag]
 
-                    if recent_years and prev_years:
+                    if recent_years and prev_years and sum(recent_papers_weights) > 0 and sum(prev_papers_weights) > 0:
                         recent_lag = abs(np.average(recent_years, weights=recent_patents_weights) - np.average(recent_years, weights=recent_papers_weights))
                         prev_lag = abs(np.average(prev_years, weights=prev_patents_weights) - np.average(prev_years, weights=prev_papers_weights))
                         lag_change = round(recent_lag - prev_lag, 1)
@@ -275,7 +316,7 @@ def load_domain_data(domain_clean):
             time_lag_change = "0"
         
         # --- Топ заявителей ---
-        if len(df_patents) > 0:
+        if len(df_patents) > 0 and 'assignee' in df_patents.columns:
             top_assignees_df = df_patents['assignee'].value_counts().head(5).reset_index()
             top_assignees_df.columns = ['assignee', 'count']
             top_assignees = top_assignees_df['assignee'].tolist()
@@ -299,26 +340,29 @@ def load_domain_data(domain_clean):
             'Johns Hopkins University': 'США', 'University of Oxford': 'Великобритания'
         }
         
-        if len(df_all) > 0:
+        if len(df_all) > 0 and 'assignee' in df_all.columns:
             df_all['country'] = df_all['assignee'].map(countries_map).fillna('Другие')
             countries_data = df_all['country'].value_counts().head(5).reset_index()
             countries_data.columns = ['country', 'count']
             total = countries_data['count'].sum()
-            countries = countries_data['country'].tolist()
-            country_values = (countries_data['count'] / total * 100).round(1).tolist()
+            if total > 0:
+                countries = countries_data['country'].tolist()
+                country_values = (countries_data['count'] / total * 100).round(1).tolist()
+            else:
+                countries = ["Нет данных"]
+                country_values = [100]
         else:
             countries = ["Нет данных"]
             country_values = [100]
         
-        # --- AI-интеграция (для полупроводников) ---
+        # --- AI-интеграция ---
         ai_share = 0
-        if domain_clean == "Полупроводники" and len(df_patents) > 0:
-            ai_topics = ['GAA транзисторы', 'Квантовые точки', '2D материалы', 'Нейроморфные вычисления']
-            ai_patents = df_patents[df_patents['topic'].isin(ai_topics)]
-            if len(ai_patents) > 0:
-                ai_share = round(len(ai_patents) / len(df_patents) * 100, 1)
-        elif domain_clean == "Генная инженерия" and len(df_patents) > 0:
-            ai_topics = ['CRISPR-Cas9', 'CRISPR-Cas12a', 'Базовое редактирование', 'Прайм-редактирование']
+        if len(df_patents) > 0 and 'topic' in df_patents.columns:
+            if domain_clean == "Полупроводники":
+                ai_topics = ['GAA транзисторы', 'Квантовые точки', '2D материалы', 'Нейроморфные вычисления']
+            else:
+                ai_topics = ['CRISPR-Cas9', 'CRISPR-Cas12a', 'Базовое редактирование', 'Прайм-редактирование']
+            
             ai_patents = df_patents[df_patents['topic'].isin(ai_topics)]
             if len(ai_patents) > 0:
                 ai_share = round(len(ai_patents) / len(df_patents) * 100, 1)
@@ -339,10 +383,13 @@ def load_domain_data(domain_clean):
             'assignee_values': assignee_values,
             'countries': countries,
             'country_values': country_values,
-            'source_info': source_info  # Добавляем информацию об источнике
+            'source_info': source_info
         }
         
-        print("✅ Данные успешно загружены и обработаны")
+        print(f"✅ Данные успешно загружены и обработаны")
+        print(f"   Trend Score: {trend_score} - {trend_status}")
+        print(f"   Всего публикаций: {papers_total}, патентов: {patents_total}")
+        
         return np.array(all_months), np.array(papers_aligned), np.array(patents_aligned), metrics
         
     except Exception as e:
